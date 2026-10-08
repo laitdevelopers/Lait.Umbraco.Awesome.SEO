@@ -112,8 +112,10 @@ dotnet test
 - `test/pack-local.ps1` packs to a local NuGet folder feed so any site on your machine can `dotnet add package` it.
 
 Release: bump `<Version>` in the `.csproj` and `version` in `wwwroot/umbraco-package.json` (plus the `?v=` cache
-busters in the `.js` imports), then `dotnet pack -c Release` and push the `.nupkg` to nuget.org. The Umbraco
-Marketplace picks it up from NuGet and reads `umbraco-marketplace.json` from this repository.
+busters in the `.js` imports), commit, and push a tag `v<version>` (e.g. `v1.0.1`). The GitHub Action
+`.github/workflows/publish.yml` tests, packs and publishes to nuget.org with
+[Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), so no API key is stored anywhere.
+The Umbraco Marketplace picks the package up from NuGet and reads `umbraco-marketplace.json` from this repository.
 
 ## Author
 

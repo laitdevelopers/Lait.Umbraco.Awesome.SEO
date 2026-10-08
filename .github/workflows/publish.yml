@@ -1,0 +1,45 @@
+# Publishes to nuget.org with Trusted Publishing (no stored API key): push a tag like v1.0.0.
+# nuget.org policy (bootsmann → Trusted Publishing): owner laitdevelopers, repository Lait.Umbraco.Awesome.SEO, workflow file publish.yml.
+name: Publish to NuGet
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # lets GitHub issue the OIDC token that nuget.org exchanges for a 1-hour API key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Tag must match the package version
+        run: |
+          version=$(grep -oPm1 '(?<=<Version>)[^<]+' src/Lait.Umbraco.Awesome.SEO/Lait.Umbraco.Awesome.SEO.csproj)
+          manifest=$(grep -oPm1 '(?<="version": ")[^"]+' src/Lait.Umbraco.Awesome.SEO/wwwroot/umbraco-package.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ] || [ "$manifest" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME, csproj $version and umbraco-package.json $manifest must match." >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: dotnet test test/Lait.Umbraco.Awesome.SEO.Tests -c Release
+
+      - name: Pack
+        run: dotnet pack src/Lait.Umbraco.Awesome.SEO -c Release -o artifacts
+
+      - name: NuGet login (OIDC → temporary API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: bootsmann   # nuget.org profile name (public, shown as package owner)
+
+      - name: Push
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
