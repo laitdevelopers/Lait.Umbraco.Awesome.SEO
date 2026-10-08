@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <StaticWebAssetBasePath>App_Plugins/LaitSeoReport</StaticWebAssetBasePath>
+
+    <!-- NuGet / Marketplace metadata (used by `dotnet pack`) -->
+    <PackageId>Lait.Umbraco.Awesome.SEO</PackageId>
+    <Title>Awesome SEO for Umbraco</Title>
+    <Version>1.0.0</Version>
+    <Authors>LAIT, Anders Bootsmann Overvad</Authors>
+    <Company>LAIT</Company>
+    <Copyright>Copyright (c) 2026 LAIT</Copyright>
+    <Description>SEO report and action plan inside the Umbraco 17 backoffice. Crawls your site and up to 5 competitors on a schedule, runs 38 SEO checks (indexing, technical, on-page, content), gives a health score, shows what changed since last time, compares you side by side with your competitors and builds a prioritised action plan with links straight to the pages in Umbraco. Free and works without any external service; optional AI (Claude and/or Jev by TypeSafe) explains the changes and makes the plan concrete, with a monthly USD cap. Dashboard UI in Danish.</Description>
+    <PackageTags>umbraco umbraco-marketplace seo seo-audit crawler competitor-analysis health-score action-plan ai claude</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- The Marketplace fetches umbraco-marketplace.json from the repo root of this URL. -->
+    <PackageProjectUrl>https://github.com/laitdevelopers/Lait.Umbraco.Awesome.SEO</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/laitdevelopers/Lait.Umbraco.Awesome.SEO</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lait.Umbraco.Awesome.SEO.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Anthropic" Version="12.54.1" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.13.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.10.1" />
+    <PackageReference Include="Umbraco.Cms.Api.Management" Version="17.0.0" />
+    <PackageReference Include="Umbraco.Cms.Web.Common" Version="17.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

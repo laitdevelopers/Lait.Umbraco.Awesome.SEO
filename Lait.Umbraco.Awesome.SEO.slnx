@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lait.Umbraco.Awesome.SEO/Lait.Umbraco.Awesome.SEO.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Lait.Umbraco.Awesome.SEO.Tests/Lait.Umbraco.Awesome.SEO.Tests.csproj" />
+  </Folder>
+</Solution>
