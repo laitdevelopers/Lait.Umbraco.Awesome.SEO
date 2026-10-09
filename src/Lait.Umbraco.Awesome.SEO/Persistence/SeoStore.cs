@@ -48,6 +48,12 @@ public sealed class SeoStore(IScopeProvider scopeProvider)
         return scope.Database.Fetch<FindingRow>("WHERE RunId = @0", runId);
     }
 
+    public List<PageRow> PageRows(int runId)
+    {
+        using var scope = scopeProvider.CreateScope(autoComplete: true);
+        return scope.Database.Fetch<PageRow>("WHERE RunId = @0", runId);
+    }
+
     public List<ChangeRow> ChangeRows(int runId)
     {
         using var scope = scopeProvider.CreateScope(autoComplete: true);

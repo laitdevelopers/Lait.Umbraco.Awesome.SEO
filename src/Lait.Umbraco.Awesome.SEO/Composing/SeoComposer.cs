@@ -1,6 +1,7 @@
 using Lait.Umbraco.Awesome.SEO.Ai;
 using Lait.Umbraco.Awesome.SEO.Configuration;
 using Lait.Umbraco.Awesome.SEO.Persistence;
+using Lait.Umbraco.Awesome.SEO.Search;
 using Lait.Umbraco.Awesome.SEO.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -52,6 +53,11 @@ public sealed class SeoComposer : IComposer
         builder.Services.AddSingleton<JevImpactScorer>();
         builder.Services.AddSingleton<PlanWriter>();
         builder.Services.AddSingleton<PlanService>();
+
+        builder.Services.AddMemoryCache();
+        builder.Services.AddHttpClient(SearchConsoleClient.HttpClientName);
+        builder.Services.AddSingleton<SearchConsoleSettings>();
+        builder.Services.AddSingleton<SearchConsoleClient>();
 
         builder.Services.AddSingleton<SeoStore>();
         builder.Services.AddSingleton<SiteSettings>();

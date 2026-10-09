@@ -106,7 +106,7 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
                 .Concat(diff.Resolved.Select(f => Row(f, false)));   // resolved ones are kept so the dashboard can show them
             var runId = store.Save(
                 new RunRow { Domain = site.Domain, StartedUtc = DateTime.UtcNow, PageCount = ctx.Pages.Count, Score = score, IsBaseline = baseline, MetricsJson = JsonSerializer.Serialize(BenchmarkMetrics.Compute(ctx, findings, disabled), Json) },
-                rows, [], []);
+                rows, PageRows(ctx), []);   // own pages too: Search Console insights need their titles
 
             var competitors = new List<CompetitorResult>();
             for (var i = 0; i < competitorUrls.Count; i++)

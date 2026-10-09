@@ -5,11 +5,13 @@ using Lait.Umbraco.Awesome.SEO.Configuration;
 using Lait.Umbraco.Awesome.SEO.Models;
 using Lait.Umbraco.Awesome.SEO.Persistence;
 using Lait.Umbraco.Awesome.SEO.Rules;
+using Lait.Umbraco.Awesome.SEO.Search;
 using Lait.Umbraco.Awesome.SEO.Services;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Api.Common.Attributes;
@@ -25,7 +27,8 @@ namespace Lait.Umbraco.Awesome.SEO.Controllers;
 [ApiVersion("1.0")]
 [ApiExplorerSettings(GroupName = "Lait SEO")]
 [Authorize(Policy = AuthorizationPolicies.BackOfficeAccess)]
-public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites, AiSettings aiSettings, ConnectionTester tester, PlanService plans, global::Umbraco.Cms.Core.Services.IMediaService mediaService, IOptionsMonitor<AiOptions> aiOptions, ILogger<SeoController> logger) : ControllerBase
+public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites, AiSettings aiSettings, ConnectionTester tester, PlanService plans, global::Umbraco.Cms.Core.Services.IMediaService mediaService, IOptionsMonitor<AiOptions> aiOptions,
+    SearchConsoleSettings searchSettings, SearchConsoleClient searchConsole, IMemoryCache cache, ContentLookup contentLookup, ILogger<SeoController> logger) : ControllerBase
 {
     static readonly Dictionary<string, Rule> Rules = RuleCatalog.All.ToDictionary(r => r.Id);
 
@@ -134,6 +137,90 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
         return new PlanDto(source, stored?.Summary, row?.CreatedUtc, row?.CostUsd, PlanBuilder.Apply(items, stored), message);
     }
 
+    /// <summary>
+    /// Search Console for the site: the last 28 days with final data vs the 28 days before, crossed with the latest crawl (titles, findings).
+    /// Google is asked at most every 6 hours per site; the crossing with the crawl is redone on every call.
+    /// </summary>
+    [HttpGet("search")]
+    [ProducesResponseType(typeof(SearchDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SearchFor(string domain, CancellationToken ct)
+    {
+        if (Site(domain) is not { } site) return NotFound();
+        var (account, _, unreadable) = searchSettings.Current();
+        if (account is null)
+            return Ok(new SearchDto(false, unreadable ? "Den gemte Search Console-nøgle kan ikke længere læses (serverens Data Protection-nøgler er skiftet). Indsæt den igen under Indstillinger." : null, null, null, null));
+        try
+        {
+            var (property, data, content) = await cache.GetOrCreateAsync($"lait-seo-search|{site.Domain}|{account.ClientEmail}", async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(6);
+                var property = SearchConsoleClient.MatchProperty(site.Url, await searchConsole.PropertiesAsync(account, ct))
+                    ?? throw new SearchConsoleException($"{account.ClientEmail} har ikke adgang til en Search Console-property for {site.Domain}. Tilføj den som bruger på property'en (domæne eller URL-præfiks) i Search Console.");
+                return (property, await searchConsole.FetchAsync(account, property, DateOnly.FromDateTime(DateTime.UtcNow), ct), await contentLookup.BuildAsync(site.Url));
+            });
+            var run = store.LatestRun(site.Domain, false);
+            var titles = (run is null ? [] : store.PageRows(run.Id))
+                .Where(p => p.Title is not null && Uri.TryCreate(p.Url, UriKind.Absolute, out _))
+                .GroupBy(p => ContentLookup.MatchKey(p.Url)).ToDictionary(g => g.Key, g => g.First().Title);
+            var findings = run is null ? [] : store.FindingRows(run.Id).Select(ToFinding).ToList();
+            var insights = SearchInsightsBuilder.Build(data, titles, findings);
+            var urls = insights.NearTop.Concat(insights.LowCtr).Select(o => o.Row.Page)
+                .Concat(insights.TopQueries.Select(q => q.Page)).Concat(insights.Declining.Select(d => d.Page))
+                .Concat(insights.Cannibals.SelectMany(c => c.Pages.Select(p => p.Page))).Concat(insights.TrafficWithFindings.Select(t => t.Page));
+            var nodes = urls.Distinct().Where(u => Uri.TryCreate(u, UriKind.Absolute, out _))
+                .Select(u => content.TryGetValue(ContentLookup.MatchKey(u), out var n) ? new PageNode(u, n.Key) : null).OfType<PageNode>().ToList();
+            return Ok(new SearchDto(true, null, property, account.ClientEmail, insights) { Nodes = nodes });
+        }
+        catch (SearchConsoleException e) { return Ok(new SearchDto(true, e.Message, null, account.ClientEmail, null)); }
+        catch (HttpRequestException e)
+        {
+            logger.LogWarning(e, "Search Console for {Domain} could not be reached", site.Domain);
+            return Ok(new SearchDto(true, "Google Search Console kunne ikke nås. Prøv igen om lidt.", null, account.ClientEmail, null));
+        }
+    }
+
+    SearchSettingsDto SearchSettingsNow()
+    {
+        var (account, source, unreadable) = searchSettings.Current();
+        return new SearchSettingsDto(source.ToString().ToLowerInvariant(), account?.ClientEmail, unreadable);
+    }
+
+    /// <summary>Saves (encrypted) or clears the service account key. Admin only.</summary>
+    [HttpPut("settings/search")]
+    [Authorize(Policy = AuthorizationPolicies.RequireAdminAccess)]
+    [ProducesResponseType(typeof(SearchSettingsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IEnumerable<string>), StatusCodes.Status400BadRequest)]
+    public IActionResult SaveSearch([FromBody] SearchSaveRequest request)
+    {
+        if (request.Clear) searchSettings.Save(null);
+        else if (request.ServiceAccountJson is not { Length: <= 20_000 } json || ServiceAccount.Parse(json) is null)
+            return BadRequest(new[] { "Det ligner ikke en JSON-nøgle for en service-konto. Indsæt hele filen fra Google Cloud (den har client_email og private_key)." });
+        else searchSettings.Save(json.Trim());
+        return Ok(SearchSettingsNow());
+    }
+
+    /// <summary>Lists the properties the key can read, and which one each site would use. A typed key is tested without being saved. Admin only.</summary>
+    [HttpPost("settings/search/test")]
+    [Authorize(Policy = AuthorizationPolicies.RequireAdminAccess)]
+    [ProducesResponseType(typeof(SearchTestResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> TestSearch([FromBody] SearchTestRequest request, CancellationToken ct)
+    {
+        var typed = !string.IsNullOrWhiteSpace(request.ServiceAccountJson);
+        var account = typed ? (request.ServiceAccountJson!.Length <= 20_000 ? ServiceAccount.Parse(request.ServiceAccountJson) : null) : searchSettings.Current().Account;
+        if (account is null)
+            return Ok(new SearchTestResult(false, typed ? "Det ligner ikke en JSON-nøgle for en service-konto." : "Der er ingen nøgle at teste.", [], []));
+        try
+        {
+            var properties = await searchConsole.PropertiesAsync(account, ct);
+            var matches = sites.Active().Select(s => new SiteProperty(s.Domain, SearchConsoleClient.MatchProperty(s.Url, properties))).ToList();
+            return Ok(properties.Count == 0
+                ? new SearchTestResult(false, $"Nøglen virker, men {account.ClientEmail} er ikke tilføjet som bruger på nogen property i Search Console endnu.", properties, matches)
+                : new SearchTestResult(true, $"Forbindelsen virker. {account.ClientEmail} kan læse {properties.Count} {(properties.Count == 1 ? "property" : "properties")}.", properties, matches));
+        }
+        catch (SearchConsoleException e) { return Ok(new SearchTestResult(false, e.Message, [], [])); }
+        catch (HttpRequestException) { return Ok(new SearchTestResult(false, "Google kunne ikke nås fra serveren.", [], [])); }
+    }
+
     /// <summary>The media item behind an image URL, so "Ret med AI" can open it in Copilot. Also matches CDN URLs that drop the /media prefix.</summary>
     [HttpGet("media")]
     [ProducesResponseType(typeof(MediaRefDto), StatusCodes.Status200OK)]
@@ -233,7 +320,7 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
         sites.All().Select(s => new SiteDto(s.Url, s.Enabled, s.IntervalDays, s.MaxPages, s.Competitors, s.DisabledRules)).ToList(),
         sites.UmbracoDomainUrls(),
         RuleCatalog.All.Select(r => new RuleInfo(r.Id, r.Category.ToString(), r.DefaultSeverity.ToString(), r.Title, HealthScore.Weight(r.Id))).ToList(),
-        AiDtoNow()));
+        AiDtoNow(), SearchSettingsNow()));
 
     AiSettingsDto AiDtoNow()
     {

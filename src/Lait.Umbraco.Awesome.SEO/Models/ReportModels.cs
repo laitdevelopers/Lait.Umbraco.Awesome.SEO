@@ -51,7 +51,28 @@ public sealed record AiSaveRequest(ClaudeSaveDto Claude, JevSaveDto Jev, double?
 /// <summary>Provider is "claude" or "jev". Everything typed in the form (key, address, model) is tested without saving; empty = use the saved/effective value.</summary>
 public sealed record TestRequest(string Provider, string? ApiKey, string? BaseUrl, string? Model);
 
-public sealed record SettingsDto(IReadOnlyList<SiteDto> Sites, IReadOnlyList<string> UmbracoDomains, IReadOnlyList<RuleInfo> Rules, AiSettingsDto Ai);
+public sealed record SettingsDto(IReadOnlyList<SiteDto> Sites, IReadOnlyList<string> UmbracoDomains, IReadOnlyList<RuleInfo> Rules, AiSettingsDto Ai, SearchSettingsDto Search);
+
+/// <summary>Configured = a service account key exists. Message (Danish) says why there is no data; Insights is null then. Nodes: the Umbraco page behind each URL in Insights, for "Ret med AI".</summary>
+public sealed record SearchDto(bool Configured, string? Message, string? Property, string? ServiceAccount, Search.SearchInsights? Insights)
+{
+    public IReadOnlyList<PageNode> Nodes { get; init; } = [];
+}
+
+public sealed record PageNode(string Url, Guid Key);
+
+/// <summary>The key itself is never sent back; ServiceAccount is its e-mail, which is what gets added as a user in Search Console.</summary>
+public sealed record SearchSettingsDto(string KeySource, string? ServiceAccount, bool Unreadable);
+
+/// <summary>Clear = delete the saved key. Otherwise ServiceAccountJson is the full key file from Google Cloud.</summary>
+public sealed record SearchSaveRequest(string? ServiceAccountJson, bool Clear);
+
+/// <summary>Empty JSON = test the saved key.</summary>
+public sealed record SearchTestRequest(string? ServiceAccountJson);
+
+public sealed record SiteProperty(string Domain, string? Property);
+
+public sealed record SearchTestResult(bool Ok, string Message, IReadOnlyList<string> Properties, IReadOnlyList<SiteProperty> Sites);
 
 /// <summary>Ready = the own site and at least one competitor have a run with metrics. Otherwise Message says what is missing.</summary>
 public sealed record BenchmarkDto(bool Ready, string? Message, DateTime? OwnRunUtc, Rules.Benchmark? Benchmark);

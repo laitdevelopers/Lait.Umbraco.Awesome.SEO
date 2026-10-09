@@ -10,7 +10,11 @@ going well, and where the competitors are ahead.
   effort, how to fix it and links straight to the affected pages in Umbraco.
 - **Competitor comparison**: the same checks run on the competitors, side by side, with *ahead / level / behind*
   per measurement, structured data types and site sections they have and you don't, and what they changed.
-- **Free and self-contained**: everything above runs inside your Umbraco, with no external service and no key.
+- **Rankings from Google Search Console** (optional, free): searches, positions, clicks and CTR for the last 28 days,
+  where a page is close to the top 3, high positions with few clicks, declining pages, several pages competing for one
+  search, and which findings sit on pages that actually get traffic.
+- **Free and self-contained**: everything above runs inside your Umbraco, with no external service and no key
+  (Search Console and AI are optional add-ons).
 - **Optional AI** (Claude and/or Jev by TypeSafe) writes a report of what changed and makes the action plan concrete
   (why it matters, step by step). You always see the maximum price first, and a monthly USD cap stops it.
 
@@ -39,7 +43,7 @@ can open the page directly from the report. Each check can be switched off per s
 
 **Limits:** pages are read as raw HTML (like most crawlers), so content rendered only by JavaScript is not seen.
 Up to 300 pages per site by default (configurable), so competitor numbers are samples, not an exact census.
-Nothing here measures rankings or traffic.
+The crawl does not measure rankings or traffic; that is what Search Console is for (below).
 
 ## Install
 
@@ -79,6 +83,29 @@ it never invents findings. Keys are encrypted with ASP.NET Data Protection and n
 
 On several servers, in containers or on Umbraco Cloud, persist and share the Data Protection key ring, otherwise a
 saved key becomes unreadable after a redeploy (the settings tab then asks you to enter it again).
+
+## Google Search Console (optional)
+
+The **Søgninger** tab shows what Google itself reports for your site (read-only, free), crossed with the crawl:
+
+- totals for the last 28 days with final data, against the 28 days before (clicks, impressions, CTR, average position);
+- **close to the top 3**: searches where a page is at position 4-20, and whether the words of the search are in its title;
+- **high position, few clicks**: top 5 with a CTR far below normal for the position (title/description to rewrite);
+- **findings on pages people find**: pages with Google traffic that have findings counting in the score;
+- **declining pages** (30 % fewer clicks or more), **several pages for one search**, and the top searches.
+
+With Umbraco AI Copilot installed, "Ret med AI" writes a new title (and description) for the page from the search.
+
+Setup, under **Indstillinger → Google Search Console**:
+
+1. In Google Cloud Console, pick or create a project and enable the **Google Search Console API**.
+2. Create a **service account** (no roles needed) and download a **JSON key** for it.
+3. In Search Console, add the service account's e-mail as a user on your property (restricted access is enough).
+4. Paste the JSON, press **Test forbindelse** (it lists which property each site will use), and save.
+
+The key is encrypted with Data Protection like the AI keys, or can come from `LaitSeo:SearchConsole:ServiceAccountJson`.
+The property is found automatically: a URL-prefix property for the site (www or not), else a domain property. Google is
+asked at most every 6 hours per site. Search Console has no data for competitors.
 
 ## Configuration (appsettings, optional)
 

@@ -4,7 +4,7 @@
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
 import { UmbElementMixin } from '@umbraco-cms/backoffice/element-api';
 import { UMB_AUTH_CONTEXT } from '@umbraco-cms/backoffice/auth';
-import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.2.0';
+import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun, getSearch } from './api.js?v=1.2.0';
 import './seo-settings.js?v=1.2.0';
 import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.2.0';
 import { findMedia } from './api.js?v=1.2.0';
@@ -68,6 +68,9 @@ const SET_VALUE =
 const AI_RULES_TAIL = `Kig på sidens felter og indhold for at finde det rigtige felt. ${SET_VALUE}`;
 const CANONICAL_SNIPPET = '<link rel="canonical" href="@Model.Url(mode: UrlMode.Absolute)" />';
 
+const int = (v) => Math.round(v).toLocaleString('da-DK');
+const num1 = (v) => v.toFixed(1).replace('.', ',');
+const pct = (v) => `${(v * 100).toFixed(1).replace('.', ',')} %`;
 const usd = (v) => `${v.toLocaleString('da-DK', { minimumFractionDigits: v < 0.1 ? 3 : 2, maximumFractionDigits: v < 0.1 ? 3 : 2 })} USD`;
 const editUrl = (key) => `/umbraco/section/content/workspace/document/edit/${key}`;
 
@@ -94,6 +97,7 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     _agents: { state: true },
     _aiPick: { state: true },
     _aiMsg: { state: true },
+    _search: { state: true },
   };
 
   constructor() {
@@ -265,7 +269,8 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
         getBenchmark(this._domain, token).catch(() => null),
         getPlan(this._domain, token).catch(() => null),
       ]);
-      Object.assign(this, { _report: report, _benchmark: benchmark, _plan: plan, _error: null });
+      Object.assign(this, { _report: report, _benchmark: benchmark, _plan: plan, _error: null, _search: null });
+      if (this._tab === 'search') this.#loadSearch();
     } catch (e) {
       this._error = e?.message ?? 'Kunne ikke hente rapporten.';
     } finally {
@@ -333,7 +338,7 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
 
   #tabs() {
     const tabs = this._domains.length
-      ? [['overview', 'Overblik'], ['plan', 'Handlingsplan'], ['findings', 'Alle fund'], ['compare', 'Konkurrenter']]
+      ? [['overview', 'Overblik'], ['search', 'Søgninger'], ['plan', 'Handlingsplan'], ['findings', 'Alle fund'], ['compare', 'Konkurrenter']]
       : [];
     if (this._admin) tabs.push(['settings', 'Indstillinger']);
     return tabs;
@@ -361,7 +366,7 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
         ${tab === 'settings' ? nothing : this.#renderAiPick()}
         ${this._aiMsg && tab !== 'settings' ? html`<div class="box warn">${this._aiMsg}</div>` : nothing}
         <uui-tab-group>
-          ${tabs.map(([key, label]) => html`<uui-tab label=${label} ?active=${tab === key} @click=${() => (this._tab = key)}>${label}</uui-tab>`)}
+          ${tabs.map(([key, label]) => html`<uui-tab label=${label} ?active=${tab === key} @click=${() => this.#openTab(key)}>${label}</uui-tab>`)}
         </uui-tab-group>
         <div class="tab-body">
           ${tab === 'settings'
@@ -449,7 +454,13 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     </div>`;
   }
 
+  #openTab(key) {
+    this._tab = key;
+    if (key === 'search') this.#loadSearch();
+  }
+
   #renderTab(tab) {
+    if (tab === 'search') return this.#renderSearch();
     const r = this._report;
     if (!r?.run) {
       return html`<div class="box info">Der er ikke lavet nogen analyse endnu. Den første kører automatisk${this._admin ? html`, eller tryk <strong>Analysér (gratis)</strong> ovenfor` : nothing}.</div>`;
@@ -458,6 +469,128 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     if (tab === 'plan') return this.#renderPlan();
     if (tab === 'compare') return this.#renderCompare(r);
     return this.#renderOverview(r);
+  }
+
+  // ---- Søgninger (Google Search Console) --------------------------------------------
+
+  /** Asked only when the tab is opened: it calls Google (the server caches it for 6 hours). */
+  async #loadSearch() {
+    const domain = this._domain;
+    if (!domain || this._search?.domain === domain) return;
+    this._search = { domain, loading: true };
+    try {
+      const data = await getSearch(domain, await this.#token());
+      if (this._domain === domain) this._search = { domain, data };
+    } catch (e) {
+      if (this._domain === domain) this._search = { domain, error: e?.message ?? 'Kunne ikke hente data fra Search Console.' };
+    }
+  }
+
+  /** "Ret med AI" for a search row: a title that uses the search (near top), or title + description that earn the click (low CTR). */
+  #searchTask(o, nodeKey, lowCtr) {
+    const r = o.row;
+    const where = `Siden (${r.page}) ligger i gennemsnit nr. ${num1(r.position)} i Google på søgningen "${r.query}"`;
+    const message = lowCtr
+      ? `${where}, men kun ${pct(r.ctr)} af dem, der ser den, klikker (normalt ca. ${pct(o.expectedCtr)} på den placering). ` +
+        'Skriv en ny SEO-titel (30-60 tegn) og meta description (120-155 tegn) på sidens sprog, der matcher søgningen og giver lyst til at klikke. Brug kun oplysninger, der står på siden.'
+      : `${where} (${int(r.impressions)} visninger på 28 dage), men ordene fra søgningen står ikke i sidens titel. ` +
+        'Foreslå en ny SEO-titel (30-60 tegn) på sidens sprog, der bruger søgningen naturligt og stadig beskriver siden. Ret ikke sidens navn i indholdstræet; brug feltet til SEO-titel eller sidetitel.';
+    return { entity: 'document', key: nodeKey, message: `${message} ${AI_RULES_TAIL}` };
+  }
+
+  #renderSearch() {
+    const s = this._search;
+    if (!s || s.loading) return html`<uui-loader></uui-loader>`;
+    if (s.error) return html`<div class="box bad">${s.error}</div>`;
+    const d = s.data;
+    if (!d.configured) {
+      return html`<div class="box info">
+        <h3>Se jeres placeringer i Google</h3>
+        <p>Forbind Google Search Console, så viser fanen jeres rigtige tal fra Google: hvilke søgninger I bliver fundet på, placering, visninger,
+          klik og klikrate, og hvor I er tæt på at rykke op. Tallene krydses med analysen, så I kan se, hvilke fund der ligger på sider, folk faktisk finder.</p>
+        ${d.message ? html`<p class="error">${d.message}</p>` : nothing}
+        ${this._admin
+          ? html`<uui-button look="primary" label="Forbind under Indstillinger" @click=${() => this.#openTab('settings')}>Forbind under Indstillinger</uui-button>`
+          : html`<p class="muted">Bed en administrator om at forbinde Search Console under Indstillinger.</p>`}
+      </div>`;
+    }
+    if (!d.insights) return html`<div class="box warn"><strong>Search Console kunne ikke læses:</strong> ${d.message}</div>`;
+
+    const i = d.insights;
+    const nodes = new Map((d.nodes ?? []).map((n) => [n.url, n.key]));
+    const day = (iso) => new Date(iso).toLocaleDateString('da-DK', { day: 'numeric', month: 'short' });
+    const path = (url) => { try { return decodeURI(new URL(url).pathname); } catch { return url; } };
+    const page = (url) => html`<a href=${url} target="_blank" rel="noopener noreferrer">${path(url)}</a>${nodes.has(url)
+      ? html` · <a href=${editUrl(nodes.get(url))} target="_blank" rel="noopener">Åbn</a>` : nothing}`;
+    // 5 %: smaller moves between two 28-day periods are noise.
+    const tile = (label, now, before, fmt, lowerIsBetter = false) => {
+      const moved = before > 0 && Math.abs(now - before) / before >= 0.05;
+      const better = lowerIsBetter ? now < before : now > before;
+      return html`<div class="tile ${moved ? (better ? 'good' : 'warn') : 'neutral'}"><span class="value">${fmt(now)}</span>
+        <span class="label">${label}</span><span class="muted">før: ${before > 0 ? fmt(before) : '–'}</span></div>`;
+    };
+    const ai = (o, lowCtr) => (this.#canAi && nodes.has(o.row.page) ? this.#aiButton(() => this.#searchTask(o, nodes.get(o.row.page), lowCtr)) : nothing);
+    const none = html`<p class="muted">Intet at vise lige nu.</p>`;
+    const inTitle = (v) => (v == null ? html`<span class="muted" title="Siden er ikke med i seneste analyse">–</span>` : v ? '✓' : html`<span class="chip new">Nej</span>`);
+
+    return html`
+      <p class="muted">Fra Google Search Console (${d.property}), ${day(i.from)}–${day(i.to)}, sammenlignet med de 28 dage før.
+        Google har 2-3 dages forsinkelse. Placering er et gennemsnit over alle visninger (1 = øverst).</p>
+      <div class="tiles">
+        ${tile('Klik', i.current.clicks, i.previous.clicks, int)}
+        ${tile('Visninger', i.current.impressions, i.previous.impressions, int)}
+        ${tile('Klikrate', i.current.ctr, i.previous.ctr, pct)}
+        ${tile('Gns. placering', i.current.position, i.previous.position, num1, true)}
+      </div>
+
+      <h3>Tæt på top 3</h3>
+      <p class="muted">Søgninger, hvor en side ligger på plads 4-20. Her giver en lille forbedring ofte flest ekstra klik: brug søgningen i titel og H1,
+        uddyb indholdet, og link til siden fra andre sider.</p>
+      ${i.nearTop.length ? html`<div class="table-wrap"><table>
+        <thead><tr><th>Søgning</th><th>Side</th><th>Placering</th><th>Visninger</th><th>I titlen</th>${this.#canAi ? html`<th></th>` : nothing}</tr></thead>
+        <tbody>${i.nearTop.map((o) => html`<tr><td>${o.row.query}</td><td class="url">${page(o.row.page)}</td><td>${num1(o.row.position)}</td>
+          <td>${int(o.row.impressions)}</td><td>${inTitle(o.inTitle)}</td>${this.#canAi ? html`<td>${o.inTitle === false ? ai(o, false) : nothing}</td>` : nothing}</tr>`)}</tbody>
+      </table></div>` : none}
+
+      <h3>Høj placering, få klik</h3>
+      <p class="muted">Siden ligger i top 5, men langt færre klikker end normalt for placeringen. Titel og beskrivelse i Google skal vise, at siden svarer på søgningen.</p>
+      ${i.lowCtr.length ? html`<div class="table-wrap"><table>
+        <thead><tr><th>Søgning</th><th>Side</th><th>Placering</th><th>Klikrate</th><th>Normalt</th><th>Visninger</th>${this.#canAi ? html`<th></th>` : nothing}</tr></thead>
+        <tbody>${i.lowCtr.map((o) => html`<tr><td>${o.row.query}</td><td class="url">${page(o.row.page)}</td><td>${num1(o.row.position)}</td>
+          <td>${pct(o.row.ctr)}</td><td class="muted">ca. ${pct(o.expectedCtr)}</td><td>${int(o.row.impressions)}</td>${this.#canAi ? html`<td>${ai(o, true)}</td>` : nothing}</tr>`)}</tbody>
+      </table></div>` : none}
+
+      <h3>Fund på sider, folk finder</h3>
+      <p class="muted">Sider med trafik fra Google, hvor analysen har fundet noget, der tæller i scoren. Ret dem først.</p>
+      ${i.trafficWithFindings.length ? html`<div class="table-wrap"><table>
+        <thead><tr><th>Side</th><th>Klik</th><th>Visninger</th><th>Fund</th></tr></thead>
+        <tbody>${i.trafficWithFindings.map((t) => html`<tr><td class="url">${page(t.page)}</td><td>${int(t.clicks)}</td><td>${int(t.impressions)}</td>
+          <td>${t.findings.join(', ')}</td></tr>`)}</tbody>
+      </table></div>` : none}
+
+      <h3>Sider, der falder</h3>
+      <p class="muted">Mindst 30 % færre klik end de 28 dage før. Tjek, om indholdet eller adressen er ændret, eller om andre har overtaget søgningen.</p>
+      ${i.declining.length ? html`<div class="table-wrap"><table>
+        <thead><tr><th>Side</th><th>Klik nu</th><th>Klik før</th><th>Placering nu</th><th>Placering før</th></tr></thead>
+        <tbody>${i.declining.map((t) => html`<tr><td class="url">${page(t.page)}</td><td>${int(t.clicks)}</td><td>${int(t.previousClicks)}</td>
+          <td>${t.position ? num1(t.position) : '–'}</td><td>${num1(t.previousPosition)}</td></tr>`)}</tbody>
+      </table></div>` : none}
+
+      <h3>Flere sider om samme søgning</h3>
+      <p class="muted">Når flere af jeres sider vises på samme søgning, konkurrerer de med hinanden. Saml dem, eller gør forskellen tydelig og link mellem dem.</p>
+      ${i.cannibals.length ? html`<div class="table-wrap"><table>
+        <thead><tr><th>Søgning</th><th>Visninger</th><th>Sider (placering, visninger)</th></tr></thead>
+        <tbody>${i.cannibals.map((c) => html`<tr><td>${c.query}</td><td>${int(c.impressions)}</td>
+          <td>${c.pages.map((p) => html`<div>${page(p.page)} <span class="muted">(${num1(p.position)}, ${int(p.impressions)})</span></div>`)}</td></tr>`)}</tbody>
+      </table></div>` : none}
+
+      <h3>Top-søgninger</h3>
+      ${i.topQueries.length ? html`<div class="table-wrap"><table>
+        <thead><tr><th>Søgning</th><th>Klik</th><th>Visninger</th><th>Klikrate</th><th>Placering</th><th>Side</th></tr></thead>
+        <tbody>${i.topQueries.map((q) => html`<tr><td>${q.query}</td><td>${int(q.clicks)}</td><td>${int(q.impressions)}</td><td>${pct(q.ctr)}</td>
+          <td>${num1(q.position)}</td><td class="url">${page(q.page)}</td></tr>`)}</tbody>
+      </table></div>` : none}
+    `;
   }
 
   // ---- shared bits ----------------------------------------------------------

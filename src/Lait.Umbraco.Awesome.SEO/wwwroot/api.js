@@ -75,3 +75,29 @@ export async function writePlan(domain, token) {
 
 /** The media item behind an image URL, or null when it is not in the media library. */
 export const findMedia = (src, token) => request(`${BASE}/media?src=${encodeURIComponent(src)}`, token).catch(() => null);
+
+/** Google Search Console for the site: { configured, message, property, serviceAccount, insights, nodes }. */
+export const getSearch = (domain, token) => request(`${BASE}/search?domain=${encodeURIComponent(domain)}`, token);
+
+/** body: { serviceAccountJson } to save, or { clear: true }. Resolves { errors } on 400, otherwise { search }. */
+export async function saveSearchSettings(body, token) {
+  const response = await fetch(`${BASE}/settings/search`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  if (response.status === 400) return { errors: await response.json() };
+  if (!response.ok) throw new Error(`Kunne ikke gemme (${response.status})`);
+  return { search: await response.json() };
+}
+
+/** Resolves { ok, message, properties, sites }. A typed key is tested without being saved; empty = the saved key. */
+export async function testSearchConnection(serviceAccountJson, token) {
+  const response = await fetch(`${BASE}/settings/search/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ serviceAccountJson: serviceAccountJson || null }),
+  });
+  if (!response.ok) throw new Error(`Test mislykkedes (${response.status})`);
+  return response.json();
+}

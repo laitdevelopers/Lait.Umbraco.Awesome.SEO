@@ -2,7 +2,7 @@
 // so even a hard refresh can keep running an old copy. Bump the ?v= on every import of this plugin's files (and in
 // umbraco-package.json) whenever a file changes.
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
-import { getSettings, saveSettings, saveAiSettings, testAiConnection } from './api.js?v=1.2.0';
+import { getSettings, saveSettings, saveAiSettings, testAiConnection, saveSearchSettings, testSearchConnection } from './api.js?v=1.2.0';
 
 const CATEGORY_LABEL = { Crawl: 'Crawl og indeksering', Technical: 'Teknik', OnPage: 'On-page', Content: 'Indhold', Links: 'Links' };
 const INTERVALS = [[1, 'Dagligt'], [7, 'Ugentligt'], [14, 'Hver 2. uge'], [30, 'Månedligt'], [60, 'Hver 2. måned']];
@@ -26,6 +26,10 @@ class LaitSeoSettings extends LitElement {
     _aiStatus: { state: true },
     _tests: { state: true },
     _testing: { state: true },
+    _searchJson: { state: true },
+    _searchErrors: { state: true },
+    _searchStatus: { state: true },
+    _searchTest: { state: true },
   };
 
   constructor() {
@@ -35,6 +39,8 @@ class LaitSeoSettings extends LitElement {
     this._pick = '';
     this._aiErrors = [];
     this._tests = {};
+    this._searchJson = '';
+    this._searchErrors = [];
   }
 
   connectedCallback() {
@@ -152,6 +158,39 @@ class LaitSeoSettings extends LitElement {
     }
   }
 
+  async #testSearch() {
+    this._testing = 'search';
+    this._searchTest = null;
+    try {
+      this._searchTest = await testSearchConnection(this._searchJson.trim(), await this.getToken());
+    } catch (e) {
+      this._searchTest = { ok: false, message: e?.message ?? 'Test mislykkedes.' };
+    } finally {
+      this._testing = null;
+    }
+  }
+
+  async #saveSearch(clear) {
+    this._busy = true;
+    this._searchErrors = [];
+    this._searchStatus = null;
+    try {
+      const result = await saveSearchSettings(clear ? { clear: true } : { serviceAccountJson: this._searchJson.trim() }, await this.getToken());
+      if (result.errors) {
+        this._searchErrors = result.errors;
+      } else {
+        this._data = { ...this._data, search: result.search };
+        this._searchJson = '';
+        this._searchStatus = clear ? 'Den gemte nøgle er fjernet.' : 'Search Console-nøglen er gemt.';
+        this.onSaved?.();
+      }
+    } catch (e) {
+      this._searchErrors = [e?.message ?? 'Kunne ikke gemme.'];
+    } finally {
+      this._busy = false;
+    }
+  }
+
   #update(i, patch) {
     this._sites = this._sites.map((s, idx) => (idx === i ? { ...s, ...patch } : s));
     this._status = null;
@@ -201,6 +240,54 @@ class LaitSeoSettings extends LitElement {
       ${this._status ? html`<p class="ok">${this._status}</p>` : nothing}
       <uui-button look="primary" color="positive" label="Gem" ?disabled=${this._busy} @click=${this.#save}>Gem indstillinger</uui-button>
       ${this.#renderAi(this._data.ai)}
+      ${this.#renderSearch(this._data.search)}
+    `;
+  }
+
+  #renderSearch(s) {
+    const t = this._searchTest;
+    const status = s.keySource === 'database'
+      ? html`<span class="ok">Gemt i databasen (krypteret)</span>`
+      : s.keySource === 'config'
+        ? html`Sat i appsettings/secrets (<code>LaitSeo:SearchConsole:ServiceAccountJson</code>) – en nøgle gemt her går forud for den.`
+        : html`<span class="error">Ingen nøgle${s.unreadable ? ' (en gemt nøgle kunne ikke læses, indsæt den igen)' : ''}</span>`;
+    return html`
+      <h3>3. Google Search Console (valgfrit)</h3>
+      <p class="help">
+        Med Search Console viser fanen <strong>Søgninger</strong> jeres rigtige tal fra Google: søgninger, placering, visninger og klik,
+        og hvor I er tæt på at rykke op. Det er gratis og kun læseadgang. Det kræver en service-konto i Google Cloud:
+      </p>
+      <ol class="help">
+        <li>I <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>: vælg eller opret et projekt, og slå
+          <strong>Google Search Console API</strong> til under APIs &amp; Services.</li>
+        <li>Opret en <strong>service-konto</strong> under IAM &amp; Admin → Service Accounts (den skal ikke have nogen roller),
+          og hent en nøgle som <strong>JSON</strong> under Keys → Add key.</li>
+        <li>I <a href="https://search.google.com/search-console" target="_blank" rel="noopener">Search Console</a>: Indstillinger → Brugere og tilladelser →
+          Tilføj bruger med service-kontoens e-mail. Begrænset adgang er nok.</li>
+        <li>Indsæt indholdet af JSON-filen herunder, tryk <strong>Test forbindelse</strong>, og gem.</li>
+      </ol>
+      <div class="site">
+        <div>${status}${s.serviceAccount ? html` · service-konto: <code>${s.serviceAccount}</code>` : nothing}</div>
+        <label>Ny JSON-nøgle <span class="muted">(tom = behold nuværende. Indholdet vises aldrig igen, når det er gemt)</span>
+          <input type="password" autocomplete="new-password" name="lait-seo-gsc-key" spellcheck="false" placeholder='{"type": "service_account", …}'
+            .value=${this._searchJson} @input=${(e) => { this._searchJson = e.target.value; this._searchStatus = null; }} />
+        </label>
+        <div class="row">
+          <uui-button look="secondary" label="Test forbindelse" ?disabled=${this._testing === 'search'} @click=${this.#testSearch}>
+            ${this._testing === 'search' ? 'Tester …' : 'Test forbindelse'}</uui-button>
+          ${s.keySource === 'database'
+            ? html`<uui-button look="secondary" color="danger" label="Fjern gemt nøgle" ?disabled=${this._busy} @click=${() => this.#saveSearch(true)}>Fjern gemt nøgle</uui-button>`
+            : nothing}
+        </div>
+        ${t ? html`<p class=${t.ok ? 'ok' : 'error'}>${t.message}</p>
+          ${t.sites?.length ? html`<ul class="help">${t.sites.map((x) => html`<li>${x.domain}: ${x.property
+            ? html`bruger <code>${x.property}</code>`
+            : html`<span class="error">ingen property. Tilføj service-kontoen som bruger på sitets property.</span>`}</li>`)}</ul>` : nothing}` : nothing}
+      </div>
+      ${this._searchErrors.length ? html`<ul class="error">${this._searchErrors.map((e) => html`<li>${e}</li>`)}</ul>` : nothing}
+      ${this._searchStatus ? html`<p class="ok">${this._searchStatus}</p>` : nothing}
+      <uui-button look="primary" color="positive" label="Gem Search Console-nøgle" ?disabled=${this._busy || !this._searchJson.trim()} @click=${() => this.#saveSearch(false)}>
+        Gem Search Console-nøgle</uui-button>
     `;
   }
 
