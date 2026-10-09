@@ -43,6 +43,7 @@ can open the page directly from the report. Each check can be switched off per s
 
 **Limits:** pages are read as raw HTML (like most crawlers), so content rendered only by JavaScript is not seen.
 Up to 300 pages per site by default (configurable), so competitor numbers are samples, not an exact census.
+Each site (own or competitor) keeps findings and pages for its latest 10 runs; older runs keep only their score.
 The crawl does not measure rankings or traffic; that is what Search Console is for (below).
 
 ## Install

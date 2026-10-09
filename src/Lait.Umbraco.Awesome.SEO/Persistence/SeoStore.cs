@@ -122,9 +122,21 @@ public sealed class SeoStore(IScopeProvider scopeProvider)
         foreach (var f in findings) { f.RunId = run.Id; db.Insert(f); }
         foreach (var p in pages) { p.RunId = run.Id; db.Insert(p); }
         foreach (var c in changes) { c.RunId = run.Id; db.Insert(c); }
+
+        // Only the latest runs are ever read (report, diff, competitor changes), so older runs keep their row (score history) but lose
+        // findings, pages and changes. AI reports stay: they are the record of what was spent this month.
+        var cutoff = db.Fetch<int>("SELECT Id FROM laitSeoRun WHERE Domain = @0 AND IsCompetitor = @1 ORDER BY Id DESC", run.Domain, run.IsCompetitor)
+            .Skip(KeepRuns - 1).FirstOrDefault();
+        if (cutoff > 0)
+            foreach (var table in new[] { "laitSeoFinding", "laitSeoPage", "laitSeoChange" })
+                db.Execute($"DELETE FROM {table} WHERE RunId IN (SELECT Id FROM laitSeoRun WHERE Domain = @0 AND IsCompetitor = @1 AND Id < @2)",
+                    run.Domain, run.IsCompetitor, cutoff);
         scope.Complete();
         return run.Id;
     }
+
+    /// <summary>Runs per site (own or competitor) whose findings, pages and changes are kept.</summary>
+    public const int KeepRuns = 10;
 
     static int? LatestRunId(NPoco.IDatabase db, string domain, bool competitor) =>
         db.ExecuteScalar<int?>("SELECT MAX(Id) FROM laitSeoRun WHERE Domain = @0 AND IsCompetitor = @1", domain, competitor);
