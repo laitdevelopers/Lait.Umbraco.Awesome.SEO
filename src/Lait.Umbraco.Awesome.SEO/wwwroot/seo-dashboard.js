@@ -531,6 +531,9 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     };
     const ai = (o, lowCtr) => (this.#canAi && nodes.has(o.row.page) ? this.#aiButton(() => this.#searchTask(o, nodes.get(o.row.page), lowCtr)) : nothing);
     const none = html`<p class="muted">Intet at vise lige nu.</p>`;
+    // Opens the search in the editor's own browser: the only way to see who ranks above without a paid SERP service.
+    const google = (query) => html` <a class="google" href=${`https://www.google.com/search?q=${encodeURIComponent(query)}`} target="_blank" rel="noopener noreferrer"
+      title="Åbn søgningen i Google og se, hvem der ligger over jer. Et privat vindue giver mindre personlige resultater.">Google ↗</a>`;
     const inTitle = (v) => (v == null ? html`<span class="muted" title="Siden er ikke med i seneste analyse">–</span>` : v ? '✓' : html`<span class="chip new">Nej</span>`);
 
     return html`
@@ -548,15 +551,30 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
         uddyb indholdet, og link til siden fra andre sider.</p>
       ${i.nearTop.length ? html`<div class="table-wrap"><table>
         <thead><tr><th>Søgning</th><th>Side</th><th>Placering</th><th>Visninger</th><th>I titlen</th>${this.#canAi ? html`<th></th>` : nothing}</tr></thead>
-        <tbody>${i.nearTop.map((o) => html`<tr><td>${o.row.query}</td><td class="url">${page(o.row.page)}</td><td>${num1(o.row.position)}</td>
+        <tbody>${i.nearTop.map((o) => html`<tr><td>${o.row.query}${google(o.row.query)}</td><td class="url">${page(o.row.page)}</td><td>${num1(o.row.position)}</td>
           <td>${int(o.row.impressions)}</td><td>${inTitle(o.inTitle)}</td>${this.#canAi ? html`<td>${o.inTitle === false ? ai(o, false) : nothing}</td>` : nothing}</tr>`)}</tbody>
+      </table></div>` : none}
+
+      <h3>Konkurrenter med en side bygget til søgningen</h3>
+      <p class="muted">Søgninger, hvor I ligger under top 3, og hvor en konkurrent har en side med søgningens ord i titel, H1 eller adresse.
+        Det viser ikke, hvem der ligger højest, men hvem der har indhold målrettet søgningen, og hvor meget. Tryk "Google ↗" for at se placeringerne.</p>
+      ${!this._report?.competitors?.length
+        ? html`<p class="muted">Tilføj konkurrenter under Indstillinger og kør en analyse, så holdes deres sider op mod jeres søgninger her.</p>`
+        : i.gaps.length ? html`<div class="table-wrap"><table>
+        <thead><tr><th>Søgning</th><th>Placering</th><th>Jeres side</th><th>Konkurrenternes sider</th></tr></thead>
+        <tbody>${i.gaps.map((g) => html`<tr><td>${g.query}${google(g.query)}</td><td>${num1(g.position)}</td>
+          <td class="url">${page(g.ownUrl)}<div class="muted">${g.own
+            ? `${int(g.own.wordCount)} ord · ${g.ownTargets ? 'bygget til søgningen' : 'ikke bygget til søgningen'}${g.own.structuredData ? ' · struktureret data' : ''}`
+            : 'ikke med i seneste analyse'}</div></td>
+          <td>${g.competitors.map((c) => html`<div><strong>${c.domain}</strong> <a href=${c.page.url} target="_blank" rel="noopener noreferrer">${path(c.page.url)}</a>
+            <span class="muted">(${int(c.page.wordCount)} ord${c.page.structuredData ? ', struktureret data' : ''})</span></div>`)}</td></tr>`)}</tbody>
       </table></div>` : none}
 
       <h3>Høj placering, få klik</h3>
       <p class="muted">Siden ligger i top 5, men langt færre klikker end normalt for placeringen. Titel og beskrivelse i Google skal vise, at siden svarer på søgningen.</p>
       ${i.lowCtr.length ? html`<div class="table-wrap"><table>
         <thead><tr><th>Søgning</th><th>Side</th><th>Placering</th><th>Klikrate</th><th>Normalt</th><th>Visninger</th>${this.#canAi ? html`<th></th>` : nothing}</tr></thead>
-        <tbody>${i.lowCtr.map((o) => html`<tr><td>${o.row.query}</td><td class="url">${page(o.row.page)}</td><td>${num1(o.row.position)}</td>
+        <tbody>${i.lowCtr.map((o) => html`<tr><td>${o.row.query}${google(o.row.query)}</td><td class="url">${page(o.row.page)}</td><td>${num1(o.row.position)}</td>
           <td>${pct(o.row.ctr)}</td><td class="muted">ca. ${pct(o.expectedCtr)}</td><td>${int(o.row.impressions)}</td>${this.#canAi ? html`<td>${ai(o, true)}</td>` : nothing}</tr>`)}</tbody>
       </table></div>` : none}
 
@@ -580,14 +598,14 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
       <p class="muted">Når flere af jeres sider vises på samme søgning, konkurrerer de med hinanden. Saml dem, eller gør forskellen tydelig og link mellem dem.</p>
       ${i.cannibals.length ? html`<div class="table-wrap"><table>
         <thead><tr><th>Søgning</th><th>Visninger</th><th>Sider (placering, visninger)</th></tr></thead>
-        <tbody>${i.cannibals.map((c) => html`<tr><td>${c.query}</td><td>${int(c.impressions)}</td>
+        <tbody>${i.cannibals.map((c) => html`<tr><td>${c.query}${google(c.query)}</td><td>${int(c.impressions)}</td>
           <td>${c.pages.map((p) => html`<div>${page(p.page)} <span class="muted">(${num1(p.position)}, ${int(p.impressions)})</span></div>`)}</td></tr>`)}</tbody>
       </table></div>` : none}
 
       <h3>Top-søgninger</h3>
       ${i.topQueries.length ? html`<div class="table-wrap"><table>
         <thead><tr><th>Søgning</th><th>Klik</th><th>Visninger</th><th>Klikrate</th><th>Placering</th><th>Side</th></tr></thead>
-        <tbody>${i.topQueries.map((q) => html`<tr><td>${q.query}</td><td>${int(q.clicks)}</td><td>${int(q.impressions)}</td><td>${pct(q.ctr)}</td>
+        <tbody>${i.topQueries.map((q) => html`<tr><td>${q.query}${google(q.query)}</td><td>${int(q.clicks)}</td><td>${int(q.impressions)}</td><td>${pct(q.ctr)}</td>
           <td>${num1(q.position)}</td><td class="url">${page(q.page)}</td></tr>`)}</tbody>
       </table></div>` : none}
     `;
@@ -1074,6 +1092,7 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     .score.bad, h2.bad { border-color: var(--bad); color: var(--bad); }
     .hero > div:last-child { flex: 1; min-width: 260px; }
     ul.losses { margin: 0 0 8px; padding-left: 20px; }
+    a.google { font-size: 12px; white-space: nowrap; color: var(--uui-color-text-alt); }
 
     .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 16px 0 8px; }
     .tile { display: flex; flex-direction: column; align-items: center; padding: 12px; border-radius: 6px; border-top: 4px solid var(--uui-color-border); background: var(--uui-color-surface-alt); }

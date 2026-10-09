@@ -19,10 +19,27 @@ public sealed record Cannibal(string Query, double Impressions, IReadOnlyList<Qu
 /// <summary>A page with traffic from Google that has open findings: fix these first, they are the ones people see.</summary>
 public sealed record TrafficPage(string Page, double Clicks, double Impressions, IReadOnlyList<string> Findings);
 
+/// <summary>What the latest crawl knows about a page (own or competitor), to hold it up against a search.</summary>
+public sealed record CrawledPage(string Url, string? Title, string? H1, int WordCount, bool StructuredData)
+{
+    /// <summary>Every word of the search is in the title, the H1 or the address: the page is built for the search.</summary>
+    public bool Targets(string query) =>
+        SearchInsightsBuilder.ContainsWords($"{Title} {H1} {(Uri.TryCreate(Url, UriKind.Absolute, out var u) ? u.AbsolutePath.Replace('-', ' ').Replace('_', ' ') : "")}", query);
+}
+
+public sealed record CompetitorPage(string Domain, CrawledPage Page);
+
+/// <summary>
+/// A search where the site is below the top 3 and a competitor has a page built for it (and the own page is not, or is much thinner).
+/// It does not say who ranks higher, only who has content aimed at the search. Own: the page Google shows for the site (null = not crawled).
+/// </summary>
+public sealed record ContentGap(string Query, double Impressions, double Position, string OwnUrl, CrawledPage? Own, bool OwnTargets, IReadOnlyList<CompetitorPage> Competitors);
+
 public sealed record SearchInsights(
     DateOnly From, DateOnly To, SearchTotals Current, SearchTotals Previous,
     IReadOnlyList<QueryPage> TopQueries, IReadOnlyList<Opportunity> NearTop, IReadOnlyList<Opportunity> LowCtr,
-    IReadOnlyList<PageTrend> Declining, IReadOnlyList<Cannibal> Cannibals, IReadOnlyList<TrafficPage> TrafficWithFindings);
+    IReadOnlyList<PageTrend> Declining, IReadOnlyList<Cannibal> Cannibals, IReadOnlyList<TrafficPage> TrafficWithFindings,
+    IReadOnlyList<ContentGap> Gaps);
 
 public static class SearchInsightsBuilder
 {
@@ -31,13 +48,16 @@ public static class SearchInsightsBuilder
     // ponytail: fixed minimums suit small and mid-size sites; scale them with the site's total impressions if big sites get noisy lists
     const double MinImpressions = 20, MinLowCtrImpressions = 100, MinCannibalImpressions = 50, MinPreviousClicks = 10;
 
-    /// <param name="titles">MatchKey (host + path) → page title from the latest crawl.</param>
+    /// <param name="ownPages">MatchKey (host + path) → the own page from the latest crawl.</param>
     /// <param name="findings">Open findings of the latest crawl of the own site.</param>
-    public static SearchInsights Build(SearchData data, IReadOnlyDictionary<string, string?> titles, IReadOnlyList<Finding> findings)
+    /// <param name="competitors">Pages from the latest crawl of each competitor.</param>
+    /// <param name="brand">The site's own name (see <see cref="Brand"/>): searches for it are not content gaps.</param>
+    public static SearchInsights Build(SearchData data, IReadOnlyDictionary<string, CrawledPage> ownPages, IReadOnlyList<Finding> findings,
+        IReadOnlyList<(string Domain, IReadOnlyList<CrawledPage> Pages)>? competitors = null, string? brand = null)
     {
         var rows = data.QueryPages.Where(r => r.Keys.Count == 2)
             .Select(r => new QueryPage(r.Keys[0], r.Keys[1], r.Clicks, r.Impressions, r.Ctr, r.Position)).ToList();
-        string? Title(string page) => titles.GetValueOrDefault(Key(page));
+        string? Title(string page) => ownPages.GetValueOrDefault(Key(page))?.Title;
         Opportunity Op(QueryPage r, double? expected = null) => new(r, Title(r.Page), Title(r.Page) is { } t ? ContainsWords(t, r.Query) : null, expected);
 
         var topQueries = rows.GroupBy(r => r.Query)
@@ -86,7 +106,39 @@ public static class SearchInsightsBuilder
                 x.Found.Select(f => ruleTitles.GetValueOrDefault(f.RuleId, f.RuleId)).Distinct().ToList()))
             .Take(15).ToList();
 
-        return new SearchInsights(data.From, data.To, Totals(data.Totals), Totals(data.PreviousTotals), topQueries, nearTop, lowCtr, declining, cannibals, traffic);
+        return new SearchInsights(data.From, data.To, Totals(data.Totals), Totals(data.PreviousTotals), topQueries, nearTop, lowCtr, declining, cannibals, traffic,
+            Gaps(rows, ownPages, competitors ?? [], brand));
+    }
+
+    /// <summary>The 50 biggest non-brand searches below the top 3, each held up against every competitor's best page built for it.</summary>
+    static List<ContentGap> Gaps(List<QueryPage> rows, IReadOnlyDictionary<string, CrawledPage> ownPages,
+        IReadOnlyList<(string Domain, IReadOnlyList<CrawledPage> Pages)> competitors, string? brand)
+    {
+        if (competitors.Count == 0) return [];
+        return rows.GroupBy(r => r.Query).Select(g => g.MaxBy(r => r.Impressions)!)   // the page Google shows most for the search
+            .Where(r => r.Position >= 3.5 && r.Impressions >= MinImpressions && (brand is null || !r.Query.Contains(brand, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(r => r.Impressions).Take(50)
+            .Select(r =>
+            {
+                var own = ownPages.GetValueOrDefault(Key(r.Page));
+                var ownTargets = own?.Targets(r.Query) ?? false;
+                var theirs = competitors
+                    .Select(c => c.Pages.Where(p => p.Targets(r.Query)).MaxBy(p => p.WordCount) is { } best ? new CompetitorPage(c.Domain, best) : null)
+                    .OfType<CompetitorPage>()
+                    .Where(c => !ownTargets || c.Page.WordCount >= 1.5 * own!.WordCount)   // own page built for it too: only much deeper pages are a gap
+                    .ToList();
+                return new ContentGap(r.Query, r.Impressions, r.Position, r.Page, own, ownTargets, theirs);
+            })
+            .Where(g => g.Competitors.Count > 0).Take(15).ToList();
+    }
+
+    /// <summary>The site's name as people search for it: the first part of the host without www (lait.dk → lait). Null when too short to match safely.</summary>
+    // ponytail: host-based brand guess; a brand that differs from the domain (or a 2-letter one) is not filtered out
+    public static string? Brand(string siteUrl)
+    {
+        var host = new Uri(siteUrl).Host;
+        var name = (host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? host[4..] : host).Split('.')[0];
+        return name.Length >= 3 ? name : null;
     }
 
     static SearchTotals Totals(SearchRow? r) => r is null ? new(0, 0, 0, 0) : new(r.Clicks, r.Impressions, r.Ctr, r.Position);

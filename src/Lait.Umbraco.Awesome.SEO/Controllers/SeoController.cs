@@ -159,14 +159,17 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
                 return (property, await searchConsole.FetchAsync(account, property, DateOnly.FromDateTime(DateTime.UtcNow), ct), await contentLookup.BuildAsync(site.Url));
             });
             var run = store.LatestRun(site.Domain, false);
-            var titles = (run is null ? [] : store.PageRows(run.Id))
-                .Where(p => p.Title is not null && Uri.TryCreate(p.Url, UriKind.Absolute, out _))
-                .GroupBy(p => ContentLookup.MatchKey(p.Url)).ToDictionary(g => g.Key, g => g.First().Title);
+            var ownPages = Crawled(run).GroupBy(p => ContentLookup.MatchKey(p.Url)).ToDictionary(g => g.Key, g => g.First());
             var findings = run is null ? [] : store.FindingRows(run.Id).Select(ToFinding).ToList();
-            var insights = SearchInsightsBuilder.Build(data, titles, findings);
+            var competitors = site.Competitors.Take(SeoRunner.MaxCompetitors)
+                .Where(u => Uri.TryCreate(u, UriKind.Absolute, out _))
+                .Select(u => store.LatestRun(new Uri(u).Host, true)).OfType<RunRow>()
+                .Select(r => (r.Domain, (IReadOnlyList<CrawledPage>)Crawled(r).ToList())).ToList();
+            var insights = SearchInsightsBuilder.Build(data, ownPages, findings, competitors, SearchInsightsBuilder.Brand(site.Url));
             var urls = insights.NearTop.Concat(insights.LowCtr).Select(o => o.Row.Page)
                 .Concat(insights.TopQueries.Select(q => q.Page)).Concat(insights.Declining.Select(d => d.Page))
-                .Concat(insights.Cannibals.SelectMany(c => c.Pages.Select(p => p.Page))).Concat(insights.TrafficWithFindings.Select(t => t.Page));
+                .Concat(insights.Cannibals.SelectMany(c => c.Pages.Select(p => p.Page))).Concat(insights.TrafficWithFindings.Select(t => t.Page))
+                .Concat(insights.Gaps.Select(g => g.OwnUrl));
             var nodes = urls.Distinct().Where(u => Uri.TryCreate(u, UriKind.Absolute, out _))
                 .Select(u => content.TryGetValue(ContentLookup.MatchKey(u), out var n) ? new PageNode(u, n.Key) : null).OfType<PageNode>().ToList();
             return Ok(new SearchDto(true, null, property, account.ClientEmail, insights) { Nodes = nodes });
@@ -178,6 +181,11 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
             return Ok(new SearchDto(true, "Google Search Console kunne ikke nås. Prøv igen om lidt.", null, account.ClientEmail, null));
         }
     }
+
+    /// <summary>The pages of a run that answered 200 (not sitemap-only URLs), as the Search Console insights compare them.</summary>
+    IEnumerable<CrawledPage> Crawled(RunRow? run) => (run is null ? [] : store.PageRows(run.Id))
+        .Where(p => p.Status == 200 && Uri.TryCreate(p.Url, UriKind.Absolute, out _))
+        .Select(p => new CrawledPage(p.Url, p.Title, p.H1, p.WordCount, p.JsonLdHash.Length > 0));
 
     SearchSettingsDto SearchSettingsNow()
     {

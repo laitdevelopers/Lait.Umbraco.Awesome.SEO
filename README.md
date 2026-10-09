@@ -90,11 +90,18 @@ The **Søgninger** tab shows what Google itself reports for your site (read-only
 
 - totals for the last 28 days with final data, against the 28 days before (clicks, impressions, CTR, average position);
 - **close to the top 3**: searches where a page is at position 4-20, and whether the words of the search are in its title;
+- **competitors with a page built for the search**: for your searches below the top 3, the competitor pages (from the
+  crawl) with the search's words in title, H1 or address, against your page: words, structured data, built for it or not.
+  It shows who has content aimed at the search, not who ranks higher;
 - **high position, few clicks**: top 5 with a CTR far below normal for the position (title/description to rewrite);
 - **findings on pages people find**: pages with Google traffic that have findings counting in the score;
 - **declining pages** (30 % fewer clicks or more), **several pages for one search**, and the top searches.
 
-With Umbraco AI Copilot installed, "Ret med AI" writes a new title (and description) for the page from the search.
+Every search has a "Google ↗" link that opens it in the editor's own browser, to see who ranks above. With Umbraco AI
+Copilot installed, "Ret med AI" writes a new title (and description) for the page from the search.
+
+Competitor rankings are not fetched: Google offers no API for them (the Custom Search JSON API closes on
+1 January 2027 and Bing's search API closed in August 2025), and scraping Google breaks its terms.
 
 Setup, under **Indstillinger → Google Search Console**:
 

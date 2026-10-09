@@ -109,7 +109,10 @@ public class SearchTests
                 R(1, 120, 9, "seo pris", seo), R(1, 80, 12, "seo pris", home),   // two pages for one search
                 R(9, 10, 3.2, "lait", home),                // too few impressions to matter
             ]);
-        var titles = new Dictionary<string, string?> { ["lait.dk"] = "LAIT – digitalt bureau", ["lait.dk/seo"] = "SEO bureau i Aarhus" };
+        var titles = new Dictionary<string, CrawledPage>
+        {
+            ["lait.dk"] = new(home, "LAIT – digitalt bureau", null, 500, false), ["lait.dk/seo"] = new(seo, "SEO bureau i Aarhus", null, 400, false),
+        };
         Finding[] findings = [new("ONP-05", seo, Severity.Warning, "Ingen meta description"), new("TEC-05", home, Severity.Info, "x")];
 
         var s = SearchInsightsBuilder.Build(data, titles, findings);
@@ -124,5 +127,37 @@ public class SearchTests
         Assert.Equal(["Meta description mangler"], s.TrafficWithFindings.Single().Findings);
         Assert.Equal((50, 80), (s.Current.Clicks, s.Previous.Clicks));
         Assert.Equal("lait", s.TopQueries[0].Query);
+        Assert.Empty(s.Gaps);   // no competitors given
+    }
+
+    [Fact]
+    public void Content_gaps_hold_own_searches_up_against_competitor_pages_built_for_them()
+    {
+        const string home = "https://www.lait.dk/", hosting = "https://www.lait.dk/hosting/";
+        var data = new SearchData(new DateOnly(2026, 9, 9), new DateOnly(2026, 10, 6), null, null, [], [],
+        [
+            R(1, 400, 8.2, "umbraco hosting", home),        // own page is the front page: not built for the search
+            R(1, 300, 6.0, "umbraco support", hosting),     // own page is built for it, but much thinner than theirs
+            R(1, 250, 9.0, "seo rådgivning", home),         // no competitor page for it
+            R(1, 500, 7.0, "lait umbraco", home),           // brand search
+            R(9, 900, 1.4, "umbraco bureau", home),         // already top 3
+        ]);
+        var own = new CrawledPage[] { new(home, "LAIT – digitalt bureau", "Vi bygger websites", 600, false), new(hosting, "Hosting og support af Umbraco", null, 300, false) }
+            .ToDictionary(p => Lait.Umbraco.Awesome.SEO.Services.ContentLookup.MatchKey(p.Url));
+        IReadOnlyList<(string, IReadOnlyList<CrawledPage>)> competitors =
+        [
+            ("ecreo.dk", [new("https://ecreo.dk/umbraco-hosting/", "Hosting", null, 940, true), new("https://ecreo.dk/umbraco/", "Umbraco hosting light", null, 300, false),
+                          new("https://ecreo.dk/support/", "Umbraco support", null, 800, true), new("https://ecreo.dk/umbraco-bureau/", "Umbraco bureau", null, 900, true)]),
+            ("rival.dk", [new("https://rival.dk/om/", "Om os", null, 400, false)]),
+        ];
+
+        var gaps = SearchInsightsBuilder.Build(data, own, [], competitors, SearchInsightsBuilder.Brand(home)).Gaps;
+
+        Assert.Equal(["umbraco hosting", "umbraco support"], gaps.Select(g => g.Query));
+        Assert.Equal("https://ecreo.dk/umbraco-hosting/", gaps[0].Competitors.Single().Page.Url);   // the words are in its address; deepest page wins
+        Assert.False(gaps[0].OwnTargets);
+        Assert.True(gaps[1].OwnTargets);                                                            // own page targets it, theirs is 800 vs 300 words
+        Assert.Equal("lait", SearchInsightsBuilder.Brand("https://www.lait.dk/"));
+        Assert.Null(SearchInsightsBuilder.Brand("https://ab.dk/"));
     }
 }
