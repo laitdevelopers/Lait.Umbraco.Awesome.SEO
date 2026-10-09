@@ -100,12 +100,12 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
             var baseline = previous is null;
             var diff = FindingDiff.Compare(previous ?? [], findings);
             var newKeys = baseline ? [] : diff.New.Select(f => f.DedupeKey).ToHashSet();
-            var score = HealthScore.Domain(ctx, findings);
+            var score = HealthScore.Compute(findings, ctx.Pages.Count, disabled).Score;
 
             var rows = findings.Select(f => Row(f, newKeys.Contains(f.DedupeKey)))
                 .Concat(diff.Resolved.Select(f => Row(f, false)));   // resolved ones are kept so the dashboard can show them
             var runId = store.Save(
-                new RunRow { Domain = site.Domain, StartedUtc = DateTime.UtcNow, PageCount = ctx.Pages.Count, Score = score, IsBaseline = baseline, MetricsJson = JsonSerializer.Serialize(BenchmarkMetrics.Compute(ctx, findings), Json) },
+                new RunRow { Domain = site.Domain, StartedUtc = DateTime.UtcNow, PageCount = ctx.Pages.Count, Score = score, IsBaseline = baseline, MetricsJson = JsonSerializer.Serialize(BenchmarkMetrics.Compute(ctx, findings, disabled), Json) },
                 rows, [], []);
 
             var competitors = new List<CompetitorResult>();
@@ -239,21 +239,23 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
         var previous = store.PreviousSnapshot(domain);
         var changes = previous is null ? [] : CompetitorDiff.Compare(previous, snapshot);
 
-        var pages = ctx.Pages.Values.Select(p => new PageRow
-        {
-            Url = p.Url, Status = p.Status, Title = p.Html.Title, H1 = p.Html.H1s.FirstOrDefault(), MetaDescription = p.Html.MetaDescription,
-            Canonical = p.Html.Canonical, JsonLdHash = p.Html.JsonLdHash, WordCount = p.Html.WordCount, InSitemap = ctx.SitemapUrls.Contains(p.Url),
-        }).Concat(ctx.SitemapUrls.Where(u => !ctx.Pages.ContainsKey(u)).Select(u => new PageRow { Url = u, InSitemap = true })); // sitemap-only URLs, so CMP-01 still sees them next time
+        var pages = PageRows(ctx);
 
         var runId = store.Save(
             new RunRow
             {
                 Domain = domain, IsCompetitor = true, StartedUtc = DateTime.UtcNow, PageCount = ctx.Pages.Count, IsBaseline = previous is null,
-                Score = HealthScore.Domain(ctx, theirFindings), MetricsJson = JsonSerializer.Serialize(BenchmarkMetrics.Compute(ctx, theirFindings), Json),
+                Score = HealthScore.Compute(theirFindings, ctx.Pages.Count, disabled).Score, MetricsJson = JsonSerializer.Serialize(BenchmarkMetrics.Compute(ctx, theirFindings, disabled), Json),
             },
             [], pages, changes.Select(c => new ChangeRow { Url = c.Url, Kind = c.Kind, Field = c.Field, OldValue = c.Old, NewValue = c.New }));
         return new CompetitorResult(domain, runId, previous is null, changes);
     }
+
+    static IEnumerable<PageRow> PageRows(SiteContext ctx) => ctx.Pages.Values.Select(p => new PageRow
+    {
+        Url = p.Url, Status = p.Status, Title = p.Html.Title, H1 = p.Html.H1s.FirstOrDefault(), MetaDescription = p.Html.MetaDescription,
+        Canonical = p.Html.Canonical, JsonLdHash = p.Html.JsonLdHash, WordCount = p.Html.WordCount, InSitemap = ctx.SitemapUrls.Contains(p.Url),
+    }).Concat(ctx.SitemapUrls.Where(u => !ctx.Pages.ContainsKey(u)).Select(u => new PageRow { Url = u, InSitemap = true })); // sitemap-only URLs, so CMP-01 still sees them next time
 
     Task<SiteContext> CrawlAsync(string url, int maxPages, CancellationToken ct, Action<int, int>? onProgress = null, IReadOnlyDictionary<string, string>? headers = null) =>
         new SiteCrawler(httpFactory.CreateClient(HttpClientName), new CrawlOptions { MaxPages = maxPages, Headers = headers ?? new Dictionary<string, string>() }).CrawlAsync(url, ct, onProgress);

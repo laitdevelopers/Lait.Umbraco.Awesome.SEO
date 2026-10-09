@@ -22,7 +22,8 @@ public class EngineTests
     static SiteContext Ctx(params PageSnapshot[] pages) => new() { StartUrl = Site + "/", Pages = pages.ToDictionary(p => p.Url) };
 
     static string Good(string title = "En fin og tilpas lang titel til siden", string links = "") =>
-        $"<html lang=da><head><title>{title}</title><meta name=viewport content=x><meta name=description content='{new string('m', 100)}'><link rel=canonical href='SELF'></head>" +
+        $"<html lang=da><head><title>{title}</title><meta name=viewport content=x><meta name=description content='{new string('m', 100)}'><link rel=canonical href='SELF'>" +
+        "<script type='application/ld+json'>{\"@type\":\"WebSite\",\"publisher\":{\"@type\":\"Organization\"}}</script></head>" +
         $"<body><h1>H</h1><p>{string.Join(' ', Enumerable.Repeat("ord", 200))}</p><a href='/a'>Produkter</a>{links}</body></html>";
 
     static HashSet<string> Ids(IEnumerable<Finding> f) => f.Select(x => x.RuleId).ToHashSet();
@@ -90,17 +91,53 @@ public class EngineTests
     }
 
     [Fact]
-    public void Score_formula_ignores_ignored_findings()
+    public void Score_weighs_rules_by_impact_and_share_of_pages()
     {
-        var p = Page("/", Good());
-        var ctx = Ctx(p);
-        var fs = new[]
-        {
-            new Finding("X", p.Url, Severity.Critical, ""), new Finding("Y", p.Url, Severity.Warning, ""),
-            new Finding("Z", p.Url, Severity.Info, ""), new Finding("W", p.Url, Severity.Critical, "", FindingStatus.Ignored),
-        };
-        Assert.Equal(86, HealthScore.Domain(ctx, fs)); // 100 − (10 + 3 + 1)
-        Assert.Equal(0, HealthScore.Page(Enumerable.Repeat(fs[0], 11)));
+        Finding F(string rule, string path, FindingStatus s = FindingStatus.Open) => new(rule, Site + path, Severity.Warning, "", s);
+        var disabled = new HashSet<string> { "ONP-04" };
+        var total = RuleCatalog.All.Where(r => !disabled.Contains(r.Id)).Sum(r => HealthScore.Weight(r.Id));
+
+        var s = HealthScore.Compute(
+        [
+            F("ONP-01", "/a"), F("ONP-01", "/b"), F("ONP-01", "/b"),   // title missing on 2 of 4 pages: half its weight
+            F("TEC-13", "/"),                                          // site-wide: one finding = full weight
+            F("TEC-05", "/"),                                          // weight 0: shown, not counted
+            F("CRA-01", "/c", FindingStatus.Ignored), F("ONP-04", "/c"),   // ignored and disabled: not counted
+        ], pageCount: 4, disabled);
+
+        var lost = 0.5 * HealthScore.Weight("ONP-01") + HealthScore.Weight("TEC-13");
+        Assert.Equal(100 * (1 - lost / total), s.Score, 6);
+        Assert.Equal(["TEC-13", "ONP-01"], s.Losses.Select(l => l.RuleId));
+        Assert.Equal(["Crawl", "Technical", "OnPage", "Content"], s.Categories.Select(c => c.Category));
+        Assert.Equal(100, s.Categories[0].Score);
+        Assert.True(s.Categories[1].Score < s.Score);
+        Assert.Equal(100, HealthScore.Compute([], 4).Score);
+        Assert.Equal(0, HealthScore.Compute([], 0).Score);
+    }
+
+    [Fact]
+    public void Every_rule_has_an_explicit_weight()
+    {
+        Assert.Empty(RuleCatalog.All.Select(r => r.Id).Except(HealthScore.Weights.Keys));
+        Assert.Empty(HealthScore.Weights.Keys.Except(RuleCatalog.All.Select(r => r.Id)));
+    }
+
+    [Fact]
+    public void Structured_data_rules()
+    {
+        var bare = Good().Replace("<script type='application/ld+json'>", "<script type='x'>");
+        var none = RuleEngine.Run(Ctx(Page("/", bare), Page("/a", bare)));
+        Assert.Equal("Mangler: Organization, WebSite", none.Single(f => f.RuleId == "TEC-13").Evidence);
+        Assert.Equal(2, none.Count(f => f.RuleId == "TEC-14"));
+
+        var local = bare.Replace("</head>", "<script type='application/ld+json'>{\"@type\":\"Dentist\"}</script></head>");
+        var dentist = RuleEngine.Run(Ctx(Page("/", local)));
+        Assert.Equal("Mangler: WebSite", dentist.Single(f => f.RuleId == "TEC-13").Evidence);
+        Assert.DoesNotContain(dentist, f => f.RuleId == "TEC-14");
+
+        var ok = RuleEngine.Run(Ctx(Page("/", Good()), Page("/a", bare)));
+        Assert.DoesNotContain(ok, f => f.RuleId == "TEC-13");   // only the start page counts
+        Assert.Equal([Site + "/a"], ok.Where(f => f.RuleId == "TEC-14").Select(f => f.Url));
     }
 
     [Fact]

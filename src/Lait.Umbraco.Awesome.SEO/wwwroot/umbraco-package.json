@@ -1,6 +1,6 @@
 {
   "name": "Awesome SEO for Umbraco",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "allowPackageTelemetry": false,
   "extensions": [
     {
@@ -8,7 +8,7 @@
       "alias": "lait.dashboard.seo",
       "name": "Awesome SEO for Umbraco dashboard",
       "author": "LAIT, Anders Bootsmann Overvad",
-      "js": "/App_Plugins/LaitSeoReport/seo-dashboard.js?v=1.1.2",
+      "js": "/App_Plugins/LaitSeoReport/seo-dashboard.js?v=1.2.0",
       "elementName": "lait-seo-dashboard",
       "weight": 14,
       "meta": {
@@ -26,7 +26,7 @@
       "type": "backofficeEntryPoint",
       "alias": "lait.seo.copilotBridge",
       "name": "Awesome SEO for Umbraco: Copilot bridge",
-      "js": "/App_Plugins/LaitSeoReport/seo-copilot.js?v=1.1.2"
+      "js": "/App_Plugins/LaitSeoReport/seo-copilot.js?v=1.2.0"
     }
   ]
 }

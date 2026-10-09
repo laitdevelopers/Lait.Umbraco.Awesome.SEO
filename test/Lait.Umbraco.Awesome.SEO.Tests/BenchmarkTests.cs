@@ -64,8 +64,8 @@ public class BenchmarkTests
     [Fact]
     public void Gaps_appear_only_where_a_competitor_is_clearly_better_and_list_the_own_pages_to_fix()
     {
-        var own = new SiteMetrics { Pages = 58, Score = 70, MetaDescriptionPct = 62, TitleOkPct = 90, ThinContentPct = 10, AvgWords = 400 };
-        var theirs = new SiteMetrics { Pages = 139, Score = 85, MetaDescriptionPct = 91, TitleOkPct = 92, ThinContentPct = 30, AvgWords = 410 };
+        var own = new SiteMetrics { Version = SiteMetrics.CurrentVersion, Pages = 58, Score = 70, MetaDescriptionPct = 62, TitleOkPct = 90, ThinContentPct = 10, AvgWords = 400 };
+        var theirs = new SiteMetrics { Version = SiteMetrics.CurrentVersion, Pages = 139, Score = 85, MetaDescriptionPct = 91, TitleOkPct = 92, ThinContentPct = 30, AvgWords = 410 };
         var findings = new List<Finding>
         {
             new("ONP-05", "https://own.dk/a", Severity.Warning, "Ingen meta description") { NodeId = 11, NodeKey = Guid.NewGuid(), DocumentType = "page" },
@@ -78,6 +78,7 @@ public class BenchmarkTests
 
         var keys = b.Gaps.Select(g => g.Key).ToList();
         Assert.Contains("score", keys);                      // 85 vs 70
+        Assert.DoesNotContain("score", BenchmarkBuilder.Build("own.dk", own with { Version = 2 }, findings, [Comp("rival.dk", theirs)]).Gaps.Select(g => g.Key));   // old per-page score: not comparable
         Assert.Contains("meta", keys);                       // 91 vs 62
         Assert.DoesNotContain("title", keys);                // 92 vs 90: within tolerance
         Assert.DoesNotContain("thin", keys);                 // lower is better: we have 10 % thin vs their 30 %

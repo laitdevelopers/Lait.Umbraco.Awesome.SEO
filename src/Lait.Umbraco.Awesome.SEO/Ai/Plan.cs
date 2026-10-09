@@ -43,7 +43,7 @@ public static class PlanBuilder
     };
     static readonly Dictionary<string, string> RuleEffort = new()
     {
-        ["TEC-01"] = "S", ["TEC-05"] = "S", ["TEC-06"] = "S", ["TEC-07"] = "S", ["CRA-10"] = "S", ["CRA-11"] = "S", ["ONP-13"] = "S",
+        ["TEC-01"] = "S", ["TEC-05"] = "S", ["TEC-06"] = "S", ["TEC-07"] = "S", ["CRA-10"] = "S", ["CRA-11"] = "S", ["ONP-13"] = "S", ["TEC-13"] = "S",
         ["CON-01"] = "L", ["CON-02"] = "L", ["CRA-08"] = "L",
     };
 

@@ -1,10 +1,11 @@
 # Awesome SEO for Umbraco
 
 An **SEO report and action plan inside the Umbraco 17 backoffice**. The package crawls your site and up to five
-competitors on a schedule, runs 38 SEO checks, and tells your editors in plain words what to fix first, what is
+competitors on a schedule, runs 40 SEO checks, and tells your editors in plain words what to fix first, what is
 going well, and where the competitors are ahead.
 
-- **Health score** for the site, with critical issues, warnings and info, and what is new or fixed since last time.
+- **Technical SEO score** for the site, weighted by how much each check matters for rankings, split per category and
+  with what pulls it down the most; plus critical issues, warnings and info, and what is new or fixed since last time.
 - **Action plan** sorted into *critical*, *quick wins*, *high impact*, *long term* and *nice to have*, each item with
   effort, how to fix it and links straight to the affected pages in Umbraco.
 - **Competitor comparison**: the same checks run on the competitors, side by side, with *ahead / level / behind*
@@ -17,15 +18,21 @@ going well, and where the competitors are ahead.
 
 ## What it checks
 
-38 checks in four groups, on your site and on the competitors alike:
+40 checks in four groups, on your site and on the competitors alike:
 
 - **Crawl and indexing**: 5xx/4xx pages, broken internal links, redirect chains and loops, noindex, orphan pages,
   click depth, robots.txt blocking pages in the sitemap, sitemap problems, indexable pages missing from the sitemap.
 - **Technical**: canonical (missing, pointing elsewhere, header vs HTML), HTTPS and mixed content, security headers,
-  viewport, `<html lang>`, slow TTFB, JavaScript-only pages, invalid JSON-LD.
+  viewport, `<html lang>`, slow TTFB, JavaScript-only pages, structured data (Organization/WebSite on the start page,
+  JSON-LD missing, invalid JSON-LD).
 - **On-page**: title and meta description (missing, length, generic, duplicates), H1 (missing, several, duplicates),
   skipped heading levels, images without alt, generic link text ("læs mere"), Open Graph.
 - **Content**: thin content, duplicate content, pages without links.
+
+**The score** is 100 × (1 − Σ weight × share of pages failing / Σ weight). Each check has a weight from 0 to 5 for how
+much it matters for rankings in Google: indexing, titles and duplicate content weigh most; meta description, Open Graph
+and structured data less; security headers and heading order not at all (they are still reported). Site-wide checks
+(sitemap, structured data on the start page) fail as a whole. The weights are shown next to each check in the settings.
 
 Findings on your own site are linked to the Umbraco node (looked up in the published content cache), so editors
 can open the page directly from the report. Each check can be switched off per site.

@@ -51,8 +51,11 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
         if (site is null) return NotFound();
 
         var run = store.LatestRun(site.Domain, false);
-        var findings = run is null ? [] : store.FindingRows(run.Id).Select(Dto).ToList();
+        var rows = run is null ? [] : store.FindingRows(run.Id);
+        var findings = rows.Select(Dto).ToList();
         var open = findings.Where(f => f.Status == nameof(FindingStatus.Open)).ToList();
+        // Recomputed from the stored findings, so a run from before the weighted score still shows it (and the breakdown matches the number).
+        var score = run is null ? null : HealthScore.Compute(rows.Select(ToFinding), run.PageCount, site.DisabledRules.ToHashSet());
 
         var competitors = site.Competitors.Take(SeoRunner.MaxCompetitors)
             .Where(u => Uri.TryCreate(u, UriKind.Absolute, out _))
@@ -63,11 +66,12 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
             .ToList();
 
         return Ok(new ReportDto(
-            run is null ? null : new RunDto(run.Id, run.StartedUtc, run.Score, run.PageCount, run.IsBaseline),
+            run is null ? null : new RunDto(run.Id, run.StartedUtc, score!.Score, run.PageCount, run.IsBaseline),
             new Counts(open.Count(f => f.IsNew), open.Count, findings.Count(f => f.Status == nameof(FindingStatus.Resolved)),
                 open.Count(f => f.Severity == nameof(Severity.Critical)), open.Count(f => f.Severity == nameof(Severity.Warning)), open.Count(f => f.Severity == nameof(Severity.Info))),
             findings, competitors, run is null ? null : Ai(run.Id))
         {
+            Score = score,
             Passed = run is null ? [] : RuleCatalog.All
                 .Where(r => !site.DisabledRules.Contains(r.Id) && !open.Any(f => f.RuleId == r.Id))
                 .Select(r => new PassedCheck(r.Id, r.Title, r.Category.ToString())).ToList(),
@@ -100,9 +104,7 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
     {
         var ownRun = store.LatestRun(site.Domain, false);
         var own = Metrics(ownRun);
-        var findings = ownRun is null ? [] : store.FindingRows(ownRun.Id)
-            .Select(r => new Finding(r.RuleId, r.Url, (Severity)r.Severity, r.Evidence, (FindingStatus)r.Status) { NodeId = r.NodeId, NodeKey = r.NodeKey, DocumentType = r.DocumentType })
-            .ToList();
+        var findings = ownRun is null ? [] : store.FindingRows(ownRun.Id).Select(ToFinding).ToList();
         if (ownRun is null || own is null)
             return (ownRun, null, findings, "Kør et nyt crawl for at få sammenligningen: det seneste crawl er fra før sammenligningen fandtes.");
 
@@ -230,7 +232,7 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
     public IActionResult Settings() => Ok(new SettingsDto(
         sites.All().Select(s => new SiteDto(s.Url, s.Enabled, s.IntervalDays, s.MaxPages, s.Competitors, s.DisabledRules)).ToList(),
         sites.UmbracoDomainUrls(),
-        RuleCatalog.All.Select(r => new RuleInfo(r.Id, r.Category.ToString(), r.DefaultSeverity.ToString(), r.Title)).ToList(),
+        RuleCatalog.All.Select(r => new RuleInfo(r.Id, r.Category.ToString(), r.DefaultSeverity.ToString(), r.Title, HealthScore.Weight(r.Id))).ToList(),
         AiDtoNow()));
 
     AiSettingsDto AiDtoNow()
@@ -340,6 +342,9 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
         sites.Save(valid);
         return NoContent();
     }
+
+    static Finding ToFinding(FindingRow r) =>
+        new(r.RuleId, r.Url, (Severity)r.Severity, r.Evidence, (FindingStatus)r.Status) { NodeId = r.NodeId, NodeKey = r.NodeKey, DocumentType = r.DocumentType };
 
     static FindingDto Dto(FindingRow r)
     {

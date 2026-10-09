@@ -8,8 +8,11 @@ public sealed record SectionStat(string Name, int Pages, double AvgWords);
 /// <summary>What can be measured about a crawled site from its HTML, so own site and competitors can be compared like for like.</summary>
 public sealed record SiteMetrics
 {
-    /// <summary>Which measurements exist: runs stored before a metric was added deserialize as 0 and must not be compared on it.</summary>
-    public const int CurrentVersion = 2;
+    /// <summary>
+    /// Which measurements exist: runs stored before a metric was added deserialize as 0 and must not be compared on it.
+    /// 3: Score is the weighted score (<see cref="HealthScore.Compute"/>); older runs used a per-page average.
+    /// </summary>
+    public const int CurrentVersion = 3;
     public int Version { get; init; }
     public int Pages { get; init; }
     public double Score { get; init; }
@@ -45,7 +48,7 @@ public static class BenchmarkMetrics
 {
     static readonly Regex Lang = new("^[a-z]{2}(-[a-z]{2})?$", RegexOptions.IgnoreCase);
 
-    public static SiteMetrics Compute(SiteContext ctx, IReadOnlyList<Finding> findings)
+    public static SiteMetrics Compute(SiteContext ctx, IReadOnlyList<Finding> findings, IReadOnlySet<string>? disabledRules = null)
     {
         var t = ctx.Thresholds;
         var ok = ctx.Pages.Values.Where(p => p.IsOk).ToList();
@@ -63,7 +66,7 @@ public static class BenchmarkMetrics
         {
             Version = SiteMetrics.CurrentVersion,
             Pages = ctx.Pages.Count,
-            Score = HealthScore.Domain(ctx, findings),
+            Score = HealthScore.Compute(findings, ctx.Pages.Count, disabledRules).Score,
             MetaDescriptionPct = Pct(p => !string.IsNullOrWhiteSpace(p.Html.MetaDescription), idx),
             TitleOkPct = Pct(p => !string.IsNullOrWhiteSpace(p.Html.Title) && p.Html.Title!.Length >= t.TitleMin && p.Html.Title.Length <= t.TitleMax, idx),
             SingleH1Pct = Pct(p => p.Html.H1s.Count == 1, idx),
@@ -117,14 +120,14 @@ public static class BenchmarkMetrics
 
     public static readonly IReadOnlyList<MetricDef> Definitions =
     [
-        new("score", "Sundhedsscore", "point", true, m => m.Score, [], "Ret de kritiske fund først (se fanen Fund).", 5),
+        new("score", "Teknisk SEO-score", "point", true, m => m.Score, [], "Ret de kritiske fund først, og derefter dem, der trækker scoren mest ned (se Overblik).", 5, 3),
         new("meta", "Sider med meta description", "%", true, m => m.MetaDescriptionPct, ["ONP-05"], "Skriv en unik meta description på siderne.", 5),
         new("title", "Sider med title i rigtig længde", "%", true, m => m.TitleOkPct, ["ONP-01", "ONP-02", "ONP-03"], "Ret titlerne, så de er beskrivende og holder sig inden for længdegrænsen.", 5),
         new("h1", "Sider med præcis én H1", "%", true, m => m.SingleH1Pct, ["ONP-08", "ONP-09"], "Giv hver side én H1.", 5),
         new("canonical", "Sider med canonical", "%", true, m => m.CanonicalPct, ["TEC-01"], "Tilføj canonical-tag med sidens egen URL.", 5),
         new("lang", "Sider med sprogangivelse", "%", true, m => m.LangPct, ["TEC-07"], "Sæt lang på <html>.", 5),
         new("viewport", "Sider med viewport-meta", "%", true, m => m.ViewportPct, ["TEC-06"], "Tilføj viewport-meta.", 5),
-        new("schema", "Sider med struktureret data (JSON-LD)", "%", true, m => m.StructuredDataPct, [], "Tilføj JSON-LD (fx Organization, Article, BreadcrumbList) på relevante sider.", 10),
+        new("schema", "Sider med struktureret data (JSON-LD)", "%", true, m => m.StructuredDataPct, ["TEC-14"], "Tilføj JSON-LD (fx Organization, Article, BreadcrumbList) på relevante sider.", 10),
         new("alt", "Sider hvor alle billeder har alt-tekst", "%", true, m => m.AltOkPct, ["ONP-11"], "Tilføj alt-tekst til billederne.", 5),
         new("thin", "Sider med tyndt indhold", "%", false, m => m.ThinContentPct, ["CON-01"], "Uddyb de tynde sider, eller slå dem sammen.", 5),
         new("broken", "Sider med brudte interne links", "%", false, m => m.BrokenLinkPagesPct, ["CRA-03"], "Ret eller fjern de brudte links.", 3),

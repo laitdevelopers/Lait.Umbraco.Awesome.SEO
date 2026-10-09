@@ -70,6 +70,12 @@ public static partial class RuleCatalog
 
         Page("TEC-12", Category.Technical, Severity.Warning, "Ugyldig struktureret data (JSON-LD)", "Ret JSON-LD-blokken, så den er gyldig JSON (test med Googles Rich Results Test).",
             (p, _) => p.Html.JsonLdInvalid ? "Mindst én JSON-LD-blok kan ikke læses" : null),
+        new Rule("TEC-13", Category.Technical, Severity.Warning, "Forsiden mangler Organization/WebSite (JSON-LD)",
+            "Tilføj JSON-LD på forsiden: Organization (navn, logo, adresse, kontakt) og WebSite (sitets navn). Det hjælper Google og AI-søgemaskiner med at forstå, hvem I er, og kan give logo og sitenavn i søgeresultaterne.",
+            HomeSchema),
+        Page("TEC-14", Category.Technical, Severity.Info, "Ingen struktureret data (JSON-LD)",
+            "Tilføj JSON-LD i skabelonerne: BreadcrumbList på undersider, Article på artikler og nyheder, og fx Service eller Product, hvor det passer. Test med Googles Rich Results Test.",
+            (p, _) => p.Indexable && p.Html.JsonLdHash.Length == 0 ? "Ingen JSON-LD på siden" : null),
 
         // C. On-page
         Page("ONP-01", Category.OnPage, Severity.Critical, "Title mangler", "Tilføj en unik <title>.",
@@ -165,6 +171,24 @@ public static partial class RuleCatalog
         foreach (var u in c.SitemapUrls)
             if (c.Pages.GetValueOrDefault(u) is { } p && (p.Status != 200 || p.Noindex || !p.CanonicalIsSelf))
                 yield return new Hit(u, p.Status != 200 ? $"HTTP {p.Status}" : p.Noindex ? "noindex" : $"Canonical: {p.Html.Canonical}");
+    }
+
+    // ponytail: common schema.org organization types and suffixes, not the full LocalBusiness tree; add a type here if a site is flagged wrongly
+    static readonly string[] OrgTypes = ["Corporation", "NGO", "ProfessionalService", "LegalService", "FinancialService", "Restaurant", "Dentist", "Physician", "Hotel", "Attorney", "Museum", "Library"];
+    static bool IsOrganization(string t) =>
+        OrgTypes.Contains(t, StringComparer.OrdinalIgnoreCase)
+        || new[] { "Organization", "Business", "Store" }.Any(s => t.EndsWith(s, StringComparison.OrdinalIgnoreCase));   // not "Service": a plain Service is an offer, not who offers it
+
+    static IEnumerable<Hit> HomeSchema(SiteContext c)
+    {
+        if (c.Pages.GetValueOrDefault(c.StartKey) is not { IsOk: true } home) yield break;
+        var types = home.Html.SchemaTypes;
+        var missing = new[]
+        {
+            types.Any(IsOrganization) ? null : "Organization",
+            types.Contains("WebSite", StringComparer.OrdinalIgnoreCase) ? null : "WebSite",
+        }.OfType<string>().ToList();
+        if (missing.Count > 0) yield return new Hit(home.Url, "Mangler: " + string.Join(", ", missing));
     }
 
     static IEnumerable<Hit> SecurityHeaders(SiteContext c)

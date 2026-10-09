@@ -2,7 +2,7 @@
 // so even a hard refresh can keep running an old copy. Bump the ?v= on every import of this plugin's files (and in
 // umbraco-package.json) whenever a file changes.
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
-import { getSettings, saveSettings, saveAiSettings, testAiConnection } from './api.js?v=1.1.2';
+import { getSettings, saveSettings, saveAiSettings, testAiConnection } from './api.js?v=1.2.0';
 
 const CATEGORY_LABEL = { Crawl: 'Crawl og indeksering', Technical: 'Teknik', OnPage: 'On-page', Content: 'Indhold', Links: 'Links' };
 const INTERVALS = [[1, 'Dagligt'], [7, 'Ugentligt'], [14, 'Hver 2. uge'], [30, 'Månedligt'], [60, 'Hver 2. måned']];
@@ -233,13 +233,13 @@ class LaitSeoSettings extends LitElement {
         </label>
         <details>
           <summary>Tjek (${s.disabledRules.length ? `${s.disabledRules.length} slået fra` : 'alle er slået til'})</summary>
-          <p class="muted">Slå et tjek fra, hvis det ikke giver mening for jeres site. Fund fra et slået-fra tjek vises ikke og tæller ikke i scoren.</p>
+          <p class="muted">Slå et tjek fra, hvis det ikke giver mening for jeres site. Fund fra et slået-fra tjek vises ikke og tæller ikke i scoren. Vægten (0-5) er, hvor meget tjekket betyder for placeringer i Google, og dermed for scoren.</p>
           ${grouped.map(
             ([label, rules]) => html`<div class="group"><strong>${label}</strong>
               ${rules.map(
                 (r) => html`<label class="check">
                   <input type="checkbox" .checked=${!s.disabledRules.includes(r.id)} @change=${(e) => this.#toggleRule(i, r.id, e.target.checked)} />
-                  ${r.id} – ${r.title}
+                  ${r.id} – ${r.title} <span class="muted">${r.weight ? `(vægt ${r.weight})` : '(tæller ikke i scoren)'}</span>
                 </label>`,
               )}</div>`,
           )}

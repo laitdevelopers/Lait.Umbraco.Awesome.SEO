@@ -3,7 +3,7 @@
   "PackageType": "Package",
   "Category": "Analytics & Insights",
   "Title": "Awesome SEO for Umbraco",
-  "Description": "SEO report and action plan inside the Umbraco backoffice. Crawls your site and up to 5 competitors on a schedule, runs 38 SEO checks, gives a health score, shows what changed since last time, compares you side by side with your competitors and builds a prioritised action plan with links straight to the pages in Umbraco. Free and works without any external service. Optional AI (Claude and/or Jev by TypeSafe) explains the changes and makes the plan concrete, with a monthly USD cap. Dashboard UI in Danish.",
+  "Description": "SEO report and action plan inside the Umbraco backoffice. Crawls your site and up to 5 competitors on a schedule, runs 40 SEO checks, gives a technical SEO score weighted by ranking impact, shows what changed since last time, compares you side by side with your competitors and builds a prioritised action plan with links straight to the pages in Umbraco. Free and works without any external service. Optional AI (Claude and/or Jev by TypeSafe) explains the changes and makes the plan concrete, with a monthly USD cap. Dashboard UI in Danish.",
   "LicenseTypes": [ "Free" ],
   "Tags": [ "seo", "seo audit", "competitor analysis", "crawler", "health score", "action plan", "ai", "dashboard" ],
   "DocumentationUrl": "https://github.com/laitdevelopers/Lait.Umbraco.Awesome.SEO#readme",

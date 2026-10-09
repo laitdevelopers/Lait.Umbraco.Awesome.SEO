@@ -4,10 +4,10 @@
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
 import { UmbElementMixin } from '@umbraco-cms/backoffice/element-api';
 import { UMB_AUTH_CONTEXT } from '@umbraco-cms/backoffice/auth';
-import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.1.2';
-import './seo-settings.js?v=1.1.2';
-import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.1.2';
-import { findMedia } from './api.js?v=1.1.2';
+import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.2.0';
+import './seo-settings.js?v=1.2.0';
+import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.2.0';
+import { findMedia } from './api.js?v=1.2.0';
 
 const SEVERITY_LABEL = { Critical: 'Kritisk', Warning: 'Advarsel', Info: 'Info' };
 const SEVERITY_HELP = {
@@ -482,8 +482,10 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
 
   // ---- Overblik ---------------------------------------------------------------
 
-  #renderOverview({ run, counts, ai, passed }) {
+  #renderOverview({ run, counts, ai, passed, score }) {
     const [cls, verdict, explain] = this.#grade(run.score);
+    const categories = score?.categories ?? [];
+    const losses = (score?.losses ?? []).filter((l) => l.points >= 0.1).slice(0, 5);
     const bm = this._benchmark?.ready ? this._benchmark.benchmark : null;
     const scoreRow = bm?.rows.find((r) => r.key === 'score');
     const todo = (this._plan?.items ?? []).filter((i) => i.bucket !== 'nice').slice(0, 5);
@@ -496,7 +498,13 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
         <div>
           <h2 class=${cls}>${verdict}</h2>
           <p>${explain}</p>
-          <p class="muted">Sundhedsscoren er gennemsnittet for alle gennemgåede sider. Hver side starter på 100 og mister 10 point pr. kritisk fund, 3 pr. advarsel og 1 pr. info.</p>
+          ${categories.length
+            ? html`<div class="chips">${categories.map((c) => html`<span class="chip ${c.score >= 85 ? 'good' : c.score < 60 ? 'bad' : ''}">${CATEGORY_LABEL[c.category] ?? c.category}: ${Math.round(c.score)}</span>`)}</div>`
+            : nothing}
+          ${losses.length
+            ? html`<p>Trækker mest ned:</p><ul class="losses">${losses.map((l) => html`<li>${l.title} <span class="muted">−${l.points.toFixed(1).replace('.', ',')} point</span></li>`)}</ul>`
+            : nothing}
+          <p class="muted">Teknisk SEO-score: hvert tjek vægtes efter, hvor meget det betyder for placeringer i Google, og trækker ned efter, hvor stor en del af siderne der fejler. Den viser, om det tekniske grundlag er i orden, ikke hvor I ligger i Google. Vægtene kan ses under Indstillinger.</p>
           ${scoreRow
             ? html`<p>Til sammenligning: ${bm.domains.slice(1).map((d, i) => html`<span class="chip">${d}: ${scoreRow.competitors[i] != null ? Math.round(scoreRow.competitors[i]) : '–'}</span> `)}</p>`
             : nothing}
@@ -932,6 +940,7 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     .score.warn, h2.warn { border-color: var(--warn); color: var(--warn); }
     .score.bad, h2.bad { border-color: var(--bad); color: var(--bad); }
     .hero > div:last-child { flex: 1; min-width: 260px; }
+    ul.losses { margin: 0 0 8px; padding-left: 20px; }
 
     .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 16px 0 8px; }
     .tile { display: flex; flex-direction: column; align-items: center; padding: 12px; border-radius: 6px; border-top: 4px solid var(--uui-color-border); background: var(--uui-color-surface-alt); }

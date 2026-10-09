@@ -18,6 +18,8 @@ public sealed record ReportDto(RunDto? Run, Counts Counts, IReadOnlyList<Finding
 {
     /// <summary>Checks that ran and found nothing on the own site (enabled rules without open findings), for the "I orden" list.</summary>
     public IReadOnlyList<PassedCheck> Passed { get; init; } = [];
+    /// <summary>The weighted score per category and the rules that cost the most points. Null before the first run.</summary>
+    public Rules.ScoreBreakdown? Score { get; init; }
 }
 
 public sealed record PassedCheck(string RuleId, string Title, string Category);
@@ -26,7 +28,8 @@ public sealed record EstimateDto(bool Configured, string TriageProvider, long In
 
 public sealed record SiteDto(string Url, bool Enabled, int IntervalDays, int MaxPages, List<string> Competitors, List<string> DisabledRules);
 
-public sealed record RuleInfo(string Id, string Category, string Severity, string Title);
+/// <summary>Weight: how much the rule counts in the score (0-5, 0 = not counted).</summary>
+public sealed record RuleInfo(string Id, string Category, string Severity, string Title, int Weight);
 
 public sealed record ClaudeSettingsDto(string KeySource, string? KeyHint, string? BaseUrl, string TriageModel, string ReportModel);
 
