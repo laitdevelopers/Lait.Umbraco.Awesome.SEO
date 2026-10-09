@@ -148,14 +148,16 @@ public class CreateSeoSiteTable(IMigrationContext context) : AsyncMigrationBase(
     }
 }
 
-/// <summary>Adds the node columns to laitSeoFinding on installs that created the table before they existed.</summary>
+/// <summary>
+/// Adds the node columns to laitSeoFinding on installs that created the table before they existed.
+/// Columns are added with AddColumn&lt;T&gt; (definition from the row class): Alter.Table().AddColumn() throws on SQLite.
+/// </summary>
 public class AddFindingNodeColumns(IMigrationContext context) : AsyncMigrationBase(context)
 {
     protected override Task MigrateAsync()
     {
-        if (!ColumnExists("laitSeoFinding", "NodeId")) Alter.Table("laitSeoFinding").AddColumn("NodeId").AsInt32().Nullable().Do();
-        if (!ColumnExists("laitSeoFinding", "NodeKey")) Alter.Table("laitSeoFinding").AddColumn("NodeKey").AsGuid().Nullable().Do();
-        if (!ColumnExists("laitSeoFinding", "DocumentType")) Alter.Table("laitSeoFinding").AddColumn("DocumentType").AsString(255).Nullable().Do();
+        foreach (var column in new[] { "NodeId", "NodeKey", "DocumentType" })
+            if (!ColumnExists("laitSeoFinding", column)) AddColumn<FindingRow>(column);
         return Task.CompletedTask;
     }
 }
@@ -165,7 +167,7 @@ public class AddReportCostColumn(IMigrationContext context) : AsyncMigrationBase
 {
     protected override Task MigrateAsync()
     {
-        if (!ColumnExists("laitSeoReport", "CostUsd")) Alter.Table("laitSeoReport").AddColumn("CostUsd").AsDouble().Nullable().Do();
+        if (!ColumnExists("laitSeoReport", "CostUsd")) AddColumn<ReportRow>("CostUsd");
         return Task.CompletedTask;
     }
 }
