@@ -4,10 +4,10 @@
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
 import { UmbElementMixin } from '@umbraco-cms/backoffice/element-api';
 import { UMB_AUTH_CONTEXT } from '@umbraco-cms/backoffice/auth';
-import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.1.1.1';
-import './seo-settings.js?v=1.1.1.1';
-import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.1.1.1';
-import { findMedia } from './api.js?v=1.1.1.1';
+import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.1.2';
+import './seo-settings.js?v=1.1.2';
+import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.1.2';
+import { findMedia } from './api.js?v=1.1.2';
 
 const SEVERITY_LABEL = { Critical: 'Kritisk', Warning: 'Advarsel', Info: 'Info' };
 const SEVERITY_HELP = {
@@ -46,7 +46,7 @@ const PLAN_SOURCE = {
 const AI_FIELD = {
   meta: 'Skriv en ny meta description på 120-155 tegn på sidens sprog. Den skal beskrive præcis, hvad siden handler om, og få folk til at klikke fra Google. Brug kun oplysninger, der står på siden.',
   title: 'Foreslå en ny SEO-titel på 30-60 tegn, der er unik og beskriver siden. Ret ikke sidens navn i indholdstræet; brug feltet til SEO-titel eller sidetitel, hvis siden har et.',
-  h1: 'Find ud af, hvilket felt der bliver til sidens H1 (typisk overskriften i hero eller første blok), og foreslå en ændring, så siden får præcis én H1, der beskriver siden. Ændr ikke andet indhold.',
+  h1: 'Find ud af, hvilket felt der bliver til sidens H1 (typisk overskriften i hero eller første blok), og ret det, så siden får præcis én H1, der beskriver siden. Ændr ikke andet indhold. Ligger overskriften i en blok, så brug stien til blokken i path.',
 };
 const AI_RULES = {
   'ONP-05': ['meta', 'Siden mangler en meta description.'],
@@ -60,9 +60,12 @@ const AI_RULES = {
   'ONP-09': ['h1', 'Siden har flere H1-overskrifter'],
   'ONP-14': ['h1', 'Sidens H1 er den samme som på andre sider'],
 };
-const AI_RULES_TAIL =
-  'Kig på sidens felter og indhold, og foreslå ændringen i det rigtige felt, så jeg kan godkende den. Gem og udgiv ikke selv. ' +
-  'Finder du ikke et passende felt, så skriv forslaget her i chatten og forklar, hvor det skal stå.';
+// set_value only stages the value in the editor (it does not save), so the editor reviews it in the field and saves.
+const SET_VALUE =
+  'Sæt den nye værdi direkte i det rigtige felt med værktøjet set_value, uden at spørge først. Det gemmer ikke: ændringen lægges klar i editoren, ' +
+  'så jeg kan se den i feltet og selv trykke Gem. Argumentet path er en liste, der starter med feltets alias, fx ["metaDescription"]. ' +
+  'Gem og udgiv ikke. Skriv bagefter kort, hvad du har sat og hvorfor. Fejler set_value, så skriv forslaget og fejlen her i chatten.';
+const AI_RULES_TAIL = `Kig på sidens felter og indhold for at finde det rigtige felt. ${SET_VALUE}`;
 const CANONICAL_SNIPPET = '<link rel="canonical" href="@Model.Url(mode: UrlMode.Absolute)" />';
 
 const usd = (v) => `${v.toLocaleString('da-DK', { minimumFractionDigits: v < 0.1 ? 3 : 2, maximumFractionDigits: v < 0.1 ? 3 : 2 })} USD`;
@@ -141,8 +144,8 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
         key: media.key,
         message:
           `SEO-analysen har fundet, at dette billede (${src}) bruges uden alt-tekst på sitet. Skriv en kort alt-tekst på dansk (højst 125 tegn), ` +
-          'der beskriver, hvad billedet viser, og hvorfor det er der. Foreslå den i mediets felt til alt-tekst, så jeg kan godkende den. Gem ikke selv. ' +
-          'Kan du ikke se selve billedet, så sig det og bed mig beskrive det i stedet for at gætte. Har mediet ikke et felt til alt-tekst, så forklar, hvor alt-teksten sættes.',
+          'der beskriver, hvad billedet viser, og hvorfor det er der. Kan du ikke se selve billedet, så sæt intet, men sig det og bed mig beskrive det i stedet for at gætte. ' +
+          `Ellers: ${SET_VALUE} Har mediet ikke et felt til alt-tekst, så forklar, hvor alt-teksten sættes.`,
       };
     }
     if (!page?.nodeKey) return null;
@@ -151,8 +154,8 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
       key: page.nodeKey,
       message:
         `SEO-analysen har fundet, at billedet ${src} på denne side (${page.url}) mangler alt-tekst. Find ud af, hvor billedet er valgt på siden (fx i en blok), ` +
-        'og om der er et felt til alt-tekst. Foreslå en kort alt-tekst på dansk (højst 125 tegn), der beskriver, hvad billedet viser, så jeg kan godkende den. Gem ikke selv. ' +
-        'Kan du ikke se selve billedet, så sig det og bed mig beskrive det i stedet for at gætte.',
+        'og om der er et felt til alt-tekst. Skriv en kort alt-tekst på dansk (højst 125 tegn), der beskriver, hvad billedet viser. ' +
+        `Kan du ikke se selve billedet, så sæt intet, men sig det og bed mig beskrive det i stedet for at gætte. Ellers: ${SET_VALUE}`,
     };
   }
 

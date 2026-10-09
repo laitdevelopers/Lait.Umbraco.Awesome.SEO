@@ -2,7 +2,7 @@
 // so even a hard refresh can keep running an old copy. Bump the ?v= on every import of this plugin's files (and in
 // umbraco-package.json) whenever a file changes.
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
-import { getSettings, saveSettings, saveAiSettings, testAiConnection } from './api.js?v=1.1.1.1';
+import { getSettings, saveSettings, saveAiSettings, testAiConnection } from './api.js?v=1.1.2';
 
 const CATEGORY_LABEL = { Crawl: 'Crawl og indeksering', Technical: 'Teknik', OnPage: 'On-page', Content: 'Indhold', Links: 'Links' };
 const INTERVALS = [[1, 'Dagligt'], [7, 'Ugentligt'], [14, 'Hver 2. uge'], [30, 'Månedligt'], [60, 'Hver 2. måned']];
