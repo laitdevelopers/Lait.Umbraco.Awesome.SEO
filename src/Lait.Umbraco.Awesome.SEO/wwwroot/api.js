@@ -72,3 +72,6 @@ export async function writePlan(domain, token) {
   const body = await response.json().catch(() => ({}));
   return response.ok ? body : { message: body.message ?? `Fejl (${response.status})` };
 }
+
+/** The media item behind an image URL, or null when it is not in the media library. */
+export const findMedia = (src, token) => request(`${BASE}/media?src=${encodeURIComponent(src)}`, token).catch(() => null);

@@ -1,6 +1,9 @@
 namespace Lait.Umbraco.Awesome.SEO.Crawling;
 
-public sealed record Link(string Href, string Text, bool Internal);
+/// <summary>Region: where on the page the element sits, so a fix can be pointed at the template (menu, header, footer) or the page content (indhold).</summary>
+public sealed record Link(string Href, string Text, bool Internal, string Region = "indhold");
+
+public sealed record ImageRef(string Src, string Region);
 
 /// <summary>Everything extracted from one HTML document.</summary>
 public sealed record ParsedHtml
@@ -14,6 +17,8 @@ public sealed record ParsedHtml
     public IReadOnlyList<int> HeadingLevels { get; init; } = [];
     public IReadOnlyList<string> H1s { get; init; } = [];
     public int ImagesMissingAlt { get; init; }
+    /// <summary>The images without an alt attribute, distinct by src (at most 100).</summary>
+    public IReadOnlyList<ImageRef> ImagesWithoutAlt { get; init; } = [];
     public IReadOnlyList<Link> Links { get; init; } = [];
     public int MixedContentCount { get; init; }
     public bool EmptyAppRoot { get; init; }

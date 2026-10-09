@@ -140,7 +140,7 @@ public static class BenchmarkMetrics
     ];
 }
 
-public sealed record AffectedPage(string Url, string RuleId, int? NodeId, Guid? NodeKey, string? DocumentType);
+public sealed record AffectedPage(string Url, string RuleId, int? NodeId, Guid? NodeKey, string? DocumentType, string? Evidence = null);
 
 /// <summary>Competitors holds null where that competitor's run is older than the metric. Verdict: ahead | level | behind (own vs best competitor, with tolerance).</summary>
 public sealed record MetricRow(string Key, string Label, string Unit, bool HigherIsBetter, double Own, IReadOnlyList<double?> Competitors, string Verdict);
@@ -189,7 +189,7 @@ public static class BenchmarkBuilder
                 {
                     verdict = "behind";
                     var affected = ownFindings.Where(f => f.Status == FindingStatus.Open && d.RuleIds.Contains(f.RuleId)).ToList();
-                    var pages = affected.Take(MaxAffectedPages).Select(f => new AffectedPage(f.Url, f.RuleId, f.NodeId, f.NodeKey, f.DocumentType)).ToList();
+                    var pages = affected.Take(MaxAffectedPages).Select(f => new AffectedPage(f.Url, f.RuleId, f.NodeId, f.NodeKey, f.DocumentType, f.Evidence)).ToList();
                     gaps.Add((behind / d.MinGap, new Gap(d.Key, d.Label, d.Unit, Summary(d, ours, theirs, best.Domain), d.Fix, ours, theirs, best.Domain, pages, affected.Count)));
                 }
                 else if (-behind >= d.MinGap)

@@ -61,7 +61,7 @@ public static class PlanBuilder
             {
                 Key = "rule:" + ruleId, Kind = "finding", Bucket = bucket, Effort = RuleEffort.GetValueOrDefault(ruleId, "M"),
                 Title = $"{rule?.Title ?? ruleId} ({pages} {(pages == 1 ? "side" : "sider")})", Fix = rule?.HowToFix ?? "",
-                PagesAffected = pages, Pages = hits.Take(10).Select(f => new AffectedPage(f.Url, f.RuleId, f.NodeId, f.NodeKey, f.DocumentType)).ToList(),
+                PagesAffected = pages, Pages = hits.Take(10).Select(f => new AffectedPage(f.Url, f.RuleId, f.NodeId, f.NodeKey, f.DocumentType, f.Evidence)).ToList(),
             };
         }
 

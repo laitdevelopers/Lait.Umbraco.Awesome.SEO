@@ -4,8 +4,10 @@
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
 import { UmbElementMixin } from '@umbraco-cms/backoffice/element-api';
 import { UMB_AUTH_CONTEXT } from '@umbraco-cms/backoffice/auth';
-import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.0.0';
-import './seo-settings.js?v=1.0.0';
+import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.1.0.2';
+import './seo-settings.js?v=1.1.0.2';
+import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.1.0.2';
+import { findMedia } from './api.js?v=1.1.0.2';
 
 const SEVERITY_LABEL = { Critical: 'Kritisk', Warning: 'Advarsel', Info: 'Info' };
 const SEVERITY_HELP = {
@@ -40,6 +42,29 @@ const PLAN_SOURCE = {
   'jev+claude': 'Jev har vurderet effekten, og Claude har skrevet begrundelse og trin.',
 };
 
+// "Ret med AI": what the finding is, what to write, and the guard rails (propose in the right field, never save, never invent).
+const AI_FIELD = {
+  meta: 'Skriv en ny meta description på 120-155 tegn på sidens sprog. Den skal beskrive præcis, hvad siden handler om, og få folk til at klikke fra Google. Brug kun oplysninger, der står på siden.',
+  title: 'Foreslå en ny SEO-titel på 30-60 tegn, der er unik og beskriver siden. Ret ikke sidens navn i indholdstræet; brug feltet til SEO-titel eller sidetitel, hvis siden har et.',
+  h1: 'Find ud af, hvilket felt der bliver til sidens H1 (typisk overskriften i hero eller første blok), og foreslå en ændring, så siden får præcis én H1, der beskriver siden. Ændr ikke andet indhold.',
+};
+const AI_RULES = {
+  'ONP-05': ['meta', 'Siden mangler en meta description.'],
+  'ONP-06': ['meta', 'Sidens meta description har en forkert længde'],
+  'ONP-07': ['meta', 'Sidens meta description er den samme som på andre sider'],
+  'ONP-01': ['title', 'Siden mangler en title.'],
+  'ONP-02': ['title', 'Sidens title har en forkert længde'],
+  'ONP-03': ['title', 'Sidens title er for generisk'],
+  'ONP-04': ['title', 'Sidens title er den samme som på andre sider'],
+  'ONP-08': ['h1', 'Siden har ingen H1-overskrift.'],
+  'ONP-09': ['h1', 'Siden har flere H1-overskrifter'],
+  'ONP-14': ['h1', 'Sidens H1 er den samme som på andre sider'],
+};
+const AI_RULES_TAIL =
+  'Kig på sidens felter og indhold, og foreslå ændringen i det rigtige felt, så jeg kan godkende den. Gem og udgiv ikke selv. ' +
+  'Finder du ikke et passende felt, så skriv forslaget her i chatten og forklar, hvor det skal stå.';
+const CANONICAL_SNIPPET = '<link rel="canonical" href="@Model.Url(mode: UrlMode.Absolute)" />';
+
 const usd = (v) => `${v.toLocaleString('da-DK', { minimumFractionDigits: v < 0.1 ? 3 : 2, maximumFractionDigits: v < 0.1 ? 3 : 2 })} USD`;
 const editUrl = (key) => `/umbraco/section/content/workspace/document/edit/${key}`;
 
@@ -63,6 +88,9 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     _progress: { state: true },
     _confirm: { state: true },
     _failure: { state: true },
+    _agents: { state: true },
+    _aiPick: { state: true },
+    _aiMsg: { state: true },
   };
 
   constructor() {
@@ -78,6 +106,111 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
       this._auth = auth;
       this.#init();
     });
+
+    // Umbraco AI Copilot is optional: without it _agents stays undefined and no "Ret med AI" button is shown.
+    getCopilot().then((copilot) => {
+      if (!copilot) return;
+      this.observe(copilot.agents, (agents) => (this._agents = (agents ?? []).filter((a) => a.id !== 'auto')));
+      copilot.loadAgents?.();
+    });
+  }
+
+  // ---- Ret med AI (Umbraco AI Copilot) -------------------------------------------------
+
+  get #canAi() {
+    return Array.isArray(this._agents);
+  }
+
+  #pageTask(f) {
+    const rule = AI_RULES[f.ruleId];
+    if (!rule || !f.nodeKey) return null;
+    const [field, issue] = rule;
+    const detail = rule[1].endsWith('.') ? '' : ` (${(f.evidence ?? '').slice(0, 300)}).`;
+    return {
+      entity: 'document',
+      key: f.nodeKey,
+      message: `SEO-analysen har fundet et problem på denne side (${f.url}): ${issue}${detail} ${AI_FIELD[field]} ${AI_RULES_TAIL}`,
+    };
+  }
+
+  async #imageTask(src, page) {
+    const media = await findMedia(src, await this.#token());
+    if (media) {
+      return {
+        entity: 'media',
+        key: media.key,
+        message:
+          `SEO-analysen har fundet, at dette billede (${src}) bruges uden alt-tekst på sitet. Skriv en kort alt-tekst på dansk (højst 125 tegn), ` +
+          'der beskriver, hvad billedet viser, og hvorfor det er der. Foreslå den i mediets felt til alt-tekst, så jeg kan godkende den. Gem ikke selv. ' +
+          'Kan du ikke se selve billedet, så sig det og bed mig beskrive det i stedet for at gætte. Har mediet ikke et felt til alt-tekst, så forklar, hvor alt-teksten sættes.',
+      };
+    }
+    if (!page?.nodeKey) return null;
+    return {
+      entity: 'document',
+      key: page.nodeKey,
+      message:
+        `SEO-analysen har fundet, at billedet ${src} på denne side (${page.url}) mangler alt-tekst. Find ud af, hvor billedet er valgt på siden (fx i en blok), ` +
+        'og om der er et felt til alt-tekst. Foreslå en kort alt-tekst på dansk (højst 125 tegn), der beskriver, hvad billedet viser, så jeg kan godkende den. Gem ikke selv. ' +
+        'Kan du ikke se selve billedet, så sig det og bed mig beskrive det i stedet for at gætte.',
+    };
+  }
+
+  /** One agent or none: Copilot's own default. Several: ask which one first. */
+  #fixWithAi(task) {
+    this._aiMsg = null;
+    if (!task) {
+      this._aiMsg = 'Kunne ikke finde siden eller billedet i Umbraco, så AI kan ikke åbne det.';
+      return;
+    }
+    if (!this._agents?.length) {
+      this._aiMsg = 'Umbraco AI har ingen aktive agenter. Opret en agent under AI i Indstillinger-sektionen, så kan Copilot tage opgaven.';
+      return;
+    }
+    if (this._agents.length > 1) {
+      this._aiPick = task;
+      return;
+    }
+    sendToCopilot(task);
+  }
+
+  #aiButton(getTask) {
+    if (!this.#canAi) return nothing;
+    return html`<uui-button compact look="outline" label="Ret med AI"
+      title="Åbner siden med Umbraco AI Copilot, som foreslår rettelsen. Du godkender selv."
+      @click=${async () => this.#fixWithAi(await getTask())}>✨ Ret med AI</uui-button>`;
+  }
+
+  #renderAiPick() {
+    const task = this._aiPick;
+    if (!task) return nothing;
+    const go = (agentId) => {
+      this._aiPick = null;
+      sendToCopilot({ ...task, agentId });
+    };
+    return html`<div class="box info">
+      <strong>Hvilken AI-agent skal tage opgaven?</strong>
+      <p class="muted">${task.entity === 'media' ? 'Mediet' : 'Siden'} åbnes med Umbraco AI Copilot, og agenten foreslår rettelsen. Du godkender den selv.</p>
+      <div class="actions">
+        ${this._agents.map((a) => html`<uui-button look="primary" label=${a.name} @click=${() => go(a.id)}>${a.name}</uui-button>`)}
+        <uui-button look="secondary" label="Lad Umbraco vælge" @click=${() => go('auto')}>Lad Umbraco vælge</uui-button>
+        <uui-button look="secondary" label="Annuller" @click=${() => (this._aiPick = null)}>Annuller</uui-button>
+      </div>
+    </div>`;
+  }
+
+  #renderCanonicalHelp() {
+    return html`<div class="box neutral">
+      <strong>Sådan rettes det (én gang i koden, gælder alle sider):</strong>
+      <p>Indsæt linjen i <code>&lt;head&gt;</code> i jeres layout, fx <code>Views/Shared/_Layout.cshtml</code> eller master-viewet:</p>
+      <pre>${CANONICAL_SNIPPET}</pre>
+      <div class="actions">
+        <uui-button compact look="outline" label="Kopiér" @click=${() => navigator.clipboard?.writeText(CANONICAL_SNIPPET)}>Kopiér</uui-button>
+      </div>
+      <p class="muted">Forudsætter at <code>Model</code> er den aktuelle side (standard med <code>@inherits UmbracoViewPage</code>). Bruger layoutet en egen view-model,
+        så brug <code>@Umbraco.AssignedContentItem.Url(mode: UrlMode.Absolute)</code>. Ved flere sprog giver <code>Url()</code> selv den rigtige sprogversion.
+        Det rettes ikke med AI, fordi det hører til i koden og ikke i indholdet.</p>
+    </div>`;
   }
 
   disconnectedCallback() {
@@ -218,6 +351,8 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
         ${this._failure && tab !== 'settings' ? html`<div class="box bad"><strong>Seneste analyse fejlede:</strong> ${this._failure}</div>` : nothing}
         ${this.#renderConfirm()}
         ${this.#renderProgress()}
+        ${tab === 'settings' ? nothing : this.#renderAiPick()}
+        ${this._aiMsg && tab !== 'settings' ? html`<div class="box warn">${this._aiMsg}</div>` : nothing}
         <uui-tab-group>
           ${tabs.map(([key, label]) => html`<uui-tab label=${label} ?active=${tab === key} @click=${() => (this._tab = key)}>${label}</uui-tab>`)}
         </uui-tab-group>
@@ -331,7 +466,9 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     return html`<details><summary>${total} ${total === 1 ? 'side' : 'sider'} berørt</summary>
       <ul class="pages">${pages.map(
         (p) => html`<li><a href=${p.url} target="_blank" rel="noopener noreferrer">${p.url}</a>
-          ${p.nodeKey ? html` · <a href=${editUrl(p.nodeKey)} target="_blank" rel="noopener">Åbn i backoffice</a>` : nothing}</li>`,
+          ${p.nodeKey ? html` · <a href=${editUrl(p.nodeKey)} target="_blank" rel="noopener">Åbn i backoffice</a>` : nothing}
+          ${AI_RULES[p.ruleId] && p.nodeKey ? this.#aiButton(() => this.#pageTask(p)) : nothing}
+          ${p.evidence ? html`<div class="evidence muted">${p.evidence}</div>` : nothing}</li>`,
       )}${total > pages.length ? html`<li class="muted">… og ${total - pages.length} flere. Se fanen Alle fund.</li>` : nothing}</ul>
     </details>`;
   }
@@ -525,6 +662,7 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
         ${i.impact != null ? html`<span class="chip impact" title="Jevs vurdering af effekten på synlighed i søgning">Effekt ${i.impact.toFixed(1).replace('.', ',')} af 5</span>` : nothing}
       </div>
       ${i.why ? html`<p><span class="label">Hvorfor:</span> ${i.why}</p>` : nothing}
+      ${i.key === 'gap:canonical' || i.key === 'rule:TEC-01' ? this.#renderCanonicalHelp() : nothing}
       ${i.steps?.length
         ? html`<div><span class="label">Sådan gør I:</span><ol>${i.steps.map((st) => html`<li>${st}</li>`)}</ol></div>`
         : i.fix ? html`<p><span class="label">Sådan gør I:</span> ${i.fix}</p>` : nothing}
@@ -569,14 +707,17 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
                 ${g.items.some((f) => f.isNew) ? html`<span class="chip new">Nyt</span>` : nothing}
               </summary>
               <p><span class="label">Sådan gør I:</span> ${g.howToFix}</p>
+              ${g.ruleId === 'TEC-01' ? this.#renderCanonicalHelp() : nothing}
+              ${this.#renderTargets(g)}
               <table>
-                <thead><tr><th>Side</th><th>Hvad blev fundet</th></tr></thead>
+                <thead><tr><th>Side</th><th>Hvad blev fundet</th>${this.#canAi && AI_RULES[g.ruleId] ? html`<th></th>` : nothing}</tr></thead>
                 <tbody>${g.items.map(
                   (f) => html`<tr class=${f.status === 'Resolved' ? 'resolved' : ''}>
                     <td class="url"><a href=${f.url} target="_blank" rel="noopener noreferrer">${f.url}</a>
                       ${f.nodeKey ? html`<br /><a href=${editUrl(f.nodeKey)} target="_blank" rel="noopener">Åbn i backoffice</a> <span class="muted">(${f.documentType})</span>` : nothing}
                       ${f.isNew ? html` <span class="chip new">Nyt</span>` : nothing}${f.status === 'Resolved' ? html` <span class="chip good">Løst</span>` : nothing}</td>
-                    <td>${f.evidence}</td>
+                    <td class="evidence">${f.evidence}</td>
+                    ${this.#canAi && AI_RULES[g.ruleId] ? html`<td>${f.status === 'Open' && f.nodeKey ? this.#aiButton(() => this.#pageTask(f)) : nothing}</td>` : nothing}
                   </tr>`,
                 )}</tbody>
               </table>
@@ -585,6 +726,54 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
           )
         : html`<div class="box good">Ingen fund matcher filteret.</div>`}
     `;
+  }
+
+  /**
+   * Broken links and images without alt: the same link or image usually sits on many pages (menu, footer), so show each one
+   * once with how many pages have it and where. Parses the evidence lines written by rules CRA-03 and ONP-11.
+   */
+  #renderTargets(g) {
+    if (g.ruleId !== 'CRA-03' && g.ruleId !== 'ONP-11') return nothing;
+    const rows = new Map();
+    for (const f of g.items) {
+      for (const line of f.evidence.split('\n')) {
+        if (line.startsWith('(+')) continue;
+        const region = (line.match(/ · i (\S+)$/) ?? [])[1] ?? '';
+        const target = line.split(g.ruleId === 'CRA-03' ? ' → ' : ' · ')[0];
+        const row = rows.get(target) ?? {
+          target, region, pages: 0, firstPage: f,
+          status: (line.match(/HTTP (\d+)/) ?? [])[1],
+          text: (line.match(/linktekst "([^"]*)"/) ?? [])[1],
+        };
+        row.pages++;
+        rows.set(target, row);
+      }
+    }
+    const list = [...rows.values()].sort((a, b) => b.pages - a.pages);
+    if (!list.length) return nothing;
+    const where = (r) => (/menu|header|footer|head/.test(r) ? html`<strong>${r}</strong> <span class="muted">(ret ét sted i skabelonen)</span>` : r);
+    return g.ruleId === 'CRA-03'
+      ? html`<h4>Hvilke links er brudte?</h4>
+          <table>
+            <thead><tr><th>Linket peger på</th><th>Svar</th><th>Linktekst</th><th>Hvor på siden</th><th>Antal sider</th></tr></thead>
+            <tbody>${list.map((r) => html`<tr>
+              <td class="url"><a href=${r.target} target="_blank" rel="noopener noreferrer">${r.target}</a></td>
+              <td><span class="chip bad">HTTP ${r.status ?? '?'}</span></td>
+              <td>${r.text ?? html`<span class="muted">(ingen tekst)</span>`}</td>
+              <td>${where(r.region)}</td>
+              <td>${r.pages}</td></tr>`)}</tbody>
+          </table>`
+      : html`<h4>Hvilke billeder mangler alt-tekst?</h4>
+          <table>
+            <thead><tr><th>Billede</th><th>Hvor på siden</th><th>Antal sider</th>${this.#canAi ? html`<th></th>` : nothing}</tr></thead>
+            <tbody>${list.map((r) => html`<tr>
+              <td class="url">${r.target.startsWith('http')
+                ? html`<a href=${r.target} target="_blank" rel="noopener noreferrer">${r.target.split('/').pop() || r.target}</a><br /><span class="muted">${r.target}</span>`
+                : r.target}</td>
+              <td>${where(r.region)}</td>
+              <td>${r.pages}</td>
+              ${this.#canAi ? html`<td>${r.target.startsWith('http') && r.region !== 'head' ? this.#aiButton(() => this.#imageTask(r.target, r.firstPage)) : nothing}</td>` : nothing}</tr>`)}</tbody>
+          </table>`;
   }
 
   #matchesStatus(f) {
@@ -778,6 +967,9 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--uui-color-border); vertical-align: top; }
     td.url { word-break: break-all; }
+    .evidence { white-space: pre-line; word-break: break-word; }
+    h4 { margin: 12px 0 6px; }
+    pre { background: var(--uui-color-surface-alt); padding: 8px 10px; border-radius: 4px; overflow-x: auto; margin: 4px 0; }
     td.own { font-weight: 700; }
     td.own.good { color: var(--good); background: var(--good-bg); }
     td.own.bad { color: var(--bad); background: var(--bad-bg); }

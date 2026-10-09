@@ -25,7 +25,7 @@ namespace Lait.Umbraco.Awesome.SEO.Controllers;
 [ApiVersion("1.0")]
 [ApiExplorerSettings(GroupName = "Lait SEO")]
 [Authorize(Policy = AuthorizationPolicies.BackOfficeAccess)]
-public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites, AiSettings aiSettings, ConnectionTester tester, PlanService plans, IOptionsMonitor<AiOptions> aiOptions, ILogger<SeoController> logger) : ControllerBase
+public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites, AiSettings aiSettings, ConnectionTester tester, PlanService plans, global::Umbraco.Cms.Core.Services.IMediaService mediaService, IOptionsMonitor<AiOptions> aiOptions, ILogger<SeoController> logger) : ControllerBase
 {
     static readonly Dictionary<string, Rule> Rules = RuleCatalog.All.ToDictionary(r => r.Id);
 
@@ -130,6 +130,18 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
             catch (JsonException) { /* older shape: show the rule-based plan */ }
         var source = row is null ? "rules" : row.TriageProvider.ToLowerInvariant();
         return new PlanDto(source, stored?.Summary, row?.CreatedUtc, row?.CostUsd, PlanBuilder.Apply(items, stored), message);
+    }
+
+    /// <summary>The media item behind an image URL, so "Ret med AI" can open it in Copilot. Also matches CDN URLs that drop the /media prefix.</summary>
+    [HttpGet("media")]
+    [ProducesResponseType(typeof(MediaRefDto), StatusCodes.Status200OK)]
+    public IActionResult MediaFor(string src)
+    {
+        if (!Uri.TryCreate(src, UriKind.Absolute, out var u)) return NotFound();
+        var path = Uri.UnescapeDataString(u.AbsolutePath);
+        foreach (var candidate in new[] { path, "/media" + path })
+            if (mediaService.GetMediaByPath(candidate) is { } media) return Ok(new MediaRefDto(media.Key, media.Name ?? ""));
+        return NotFound();
     }
 
     /// <summary>The action plan: always the measured, rule-based items; AI additions from the latest "Skriv med AI" for this crawl are laid on top.</summary>

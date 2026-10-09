@@ -130,4 +130,31 @@ public class DepthTests
         Assert.True(PlanWriter.OutputTokensFor(30) > PlanWriter.OutputTokensFor(5));
         Assert.True(PlanWriter.OutputTokensFor(1000) <= 8192);
     }
+
+    [Fact]
+    public void Broken_links_and_images_without_alt_say_which_one_with_link_text_and_where_on_the_page()
+    {
+        var html = "<html lang=da><head><title>En passende title til denne side her</title></head><body>" +
+                   "<nav><a href='/borte'>Karla</a></nav><main><p>Se <a href='/borte'>vores ydelse</a></p>" +
+                   "<img src='/media/hero.jpg'><img src='/media/hero.jpg'><img data-src='/media/lazy.png'><img alt='' src='/ok.png'></main>" +
+                   "<footer><img src='/logo.svg'></footer></body></html>";
+        var gone = new PageSnapshot { Url = Site + "/borte", FinalUrl = Site + "/borte", Status = 404, IsHtml = true };
+        var f = RuleEngine.Run(Ctx(false, Page("/", html), gone));
+
+        var broken = f.Single(x => x.RuleId == "CRA-03").Evidence;
+        Assert.Equal(Site + "/borte → HTTP 404 · linktekst \"Karla\" · i menu/indhold", broken);
+
+        var alt = f.Single(x => x.RuleId == "ONP-11").Evidence.Split('\n');
+        Assert.Equal([Site + "/media/hero.jpg · i indhold", Site + "/media/lazy.png · i indhold", Site + "/logo.svg · i footer"], alt);
+    }
+
+    [Fact]
+    public void Cloudflare_email_protection_links_are_ignored_and_a_tracking_pixel_in_head_is_marked_as_head()
+    {
+        var p = PageParser.Parse("<html><head><noscript><img src='https://www.facebook.com/tr?id=1'></noscript></head><body>" +
+                                 "<footer><a href='/cdn-cgi/l/email-protection#abc'>mail</a></footer></body></html>", Site + "/");
+
+        Assert.Empty(p.Links);
+        Assert.Equal("head", Assert.Single(p.ImagesWithoutAlt).Region);
+    }
 }

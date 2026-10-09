@@ -56,4 +56,6 @@ public sealed record BenchmarkDto(bool Ready, string? Message, DateTime? OwnRunU
 /// <summary>Source: rules (no AI), jev (impact rated), claude (text written) or jev+claude. Items are always the measured ones.</summary>
 public sealed record PlanDto(string Source, string? Summary, DateTime? WrittenUtc, double? CostUsd, IReadOnlyList<Ai.PlanItem> Items, string? Message);
 
+public sealed record MediaRefDto(Guid Key, string Name);
+
 public sealed record SaveSettingsRequest(List<SiteDto> Sites);

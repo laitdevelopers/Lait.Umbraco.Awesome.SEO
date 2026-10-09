@@ -16,12 +16,19 @@ public static partial class RuleCatalog
             p => p.Status >= 500, p => $"HTTP {p.Status}"),
         Pages("CRA-02", Category.Crawl, Severity.Warning, "Brudt side (4xx)", "Gendan siden, eller redirect (301) til en relevant side.",
             p => p.Status is >= 400 and < 500, p => $"HTTP {p.Status}"),
-        Page("CRA-03", Category.Crawl, Severity.Critical, "Brudt internt link", "Ret eller fjern linkene så de peger på en side der svarer 200.",
+        Page("CRA-03", Category.Crawl, Severity.Critical, "Brudt internt link", "Ret eller fjern linkene så de peger på en side der svarer 200. Ligger linket i menu, header eller footer, rettes det ét sted i skabelonen.",
             (p, c) =>
             {
+                // One line per broken target: "<url> → HTTP <status> · linktekst "<text>" · i <region>" (the dashboard parses this format).
                 var broken = p.Html.Links.Where(l => l.Internal && c.Resolve(l.Href) is { } k && c.Pages[k].Status >= 400)
-                    .Select(l => $"{l.Href} (HTTP {c.Pages[c.Resolve(l.Href)!].Status})").Distinct().ToList();
-                return broken.Count == 0 ? null : Join(broken);
+                    .GroupBy(l => l.Href)
+                    .Select(g =>
+                    {
+                        var status = c.Pages[c.Resolve(g.Key)!].Status;
+                        var text = g.Select(l => l.Text).FirstOrDefault(t => t.Length > 0);
+                        return $"{g.Key} → HTTP {status}{(text is null ? "" : $" · linktekst \"{Short(text)}\"")} · i {string.Join("/", g.Select(l => l.Region).Distinct())}";
+                    }).ToList();
+                return broken.Count == 0 ? null : Lines(broken);
             }),
         Pages("CRA-04", Category.Crawl, Severity.Warning, "Redirect-kæde", "Peg linket direkte på den endelige URL så der kun er ét redirect.",
             p => p.Redirects > 0, p => $"{p.Redirects} redirects: {p.Url} → {p.FinalUrl}", (p, c) => p.Redirects >= c.For(p.Url).RedirectChain && !p.RedirectLoop),
@@ -85,8 +92,9 @@ public static partial class RuleCatalog
             (p, _) => p.Html.H1s.Count > 1 ? $"{p.Html.H1s.Count} H1" : null),
         Page("ONP-10", Category.OnPage, Severity.Info, "Sprunget overskriftsniveau", "Brug overskrifter i rækkefølge (H2 → H3, ikke H2 → H4).",
             (p, _) => p.Html.HeadingLevels.Zip(p.Html.HeadingLevels.Skip(1)).FirstOrDefault(x => x.Second > x.First + 1) is var (a, b) && b > 0 ? $"H{a} → H{b}" : null),
-        Page("ONP-11", Category.OnPage, Severity.Warning, "Billeder uden alt-attribut", "Tilføj alt-tekst (alt=\"\" er OK for dekorative billeder).",
-            (p, _) => p.Html.ImagesMissingAlt > 0 ? $"{p.Html.ImagesMissingAlt} billeder" : null),
+        Page("ONP-11", Category.OnPage, Severity.Warning, "Billeder uden alt-attribut", "Tilføj alt-tekst (alt=\"\" er OK for dekorative billeder). Billeder i menu, header eller footer rettes ét sted i skabelonen; billeder i indholdet på mediet eller i blokken.",
+            (p, _) => p.Html.ImagesMissingAlt == 0 ? null
+                : Lines(p.Html.ImagesWithoutAlt.Select(i => $"{i.Src} · i {i.Region}").ToList())),
         Page("ONP-12", Category.OnPage, Severity.Info, "Generiske linkankre", "Brug beskrivende linktekst i stedet for \"læs mere\".",
             (p, _) =>
             {
@@ -116,6 +124,15 @@ public static partial class RuleCatalog
     static bool Blank(string? s) => string.IsNullOrWhiteSpace(s);
     static bool Outside(int n, int min, int max) => n < min || n > max;
     static string Join(IReadOnlyList<string> items) => string.Join(", ", items.Take(5)) + (items.Count > 5 ? $" (+{items.Count - 5})" : "");
+    /// <summary>One item per line, at most 20, with a count of the rest. <paramref name="total"/> when the list itself was already capped.</summary>
+    static string Lines(IReadOnlyList<string> items, int? total = null)
+    {
+        var all = total ?? items.Count;
+        return string.Join("\n", items.Take(20)) + (all > Math.Min(20, items.Count) ? $"\n(+{all - Math.Min(20, items.Count)} flere)" : "");
+    }
+
+    static string Short(string s) => s.Length <= 60 ? s : s[..57] + "…";
+
     static string TrimAnchor(string t) => t.Trim().Trim('→', '»', '>', '.', '…', ' ').ToLowerInvariant();
 
     static string? HeaderCanonical(PageSnapshot p) =>
