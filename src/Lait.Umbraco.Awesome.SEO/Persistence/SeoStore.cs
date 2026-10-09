@@ -138,6 +138,7 @@ public sealed class SeoStore(IScopeProvider scopeProvider)
     /// <summary>Runs per site (own or competitor) whose findings, pages and changes are kept.</summary>
     public const int KeepRuns = 10;
 
+    /// <summary>Runs without pages are skipped: older versions stored them when a competitor could not be crawled, and they would compare as zeros.</summary>
     static int? LatestRunId(NPoco.IDatabase db, string domain, bool competitor) =>
-        db.ExecuteScalar<int?>("SELECT MAX(Id) FROM laitSeoRun WHERE Domain = @0 AND IsCompetitor = @1", domain, competitor);
+        db.ExecuteScalar<int?>("SELECT MAX(Id) FROM laitSeoRun WHERE Domain = @0 AND IsCompetitor = @1 AND PageCount > 0", domain, competitor);
 }

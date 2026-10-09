@@ -20,6 +20,8 @@ public sealed record ReportDto(RunDto? Run, Counts Counts, IReadOnlyList<Finding
     public IReadOnlyList<PassedCheck> Passed { get; init; } = [];
     /// <summary>The weighted score per category and the rules that cost the most points. Null before the first run.</summary>
     public Rules.ScoreBreakdown? Score { get; init; }
+    /// <summary>Competitors whose last crawl failed (the comparison then uses their last good run).</summary>
+    public IReadOnlyList<Services.RunFailure> CompetitorFailures { get; init; } = [];
 }
 
 public sealed record PassedCheck(string RuleId, string Title, string Category);

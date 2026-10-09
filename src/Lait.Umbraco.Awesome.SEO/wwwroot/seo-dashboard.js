@@ -4,10 +4,10 @@
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
 import { UmbElementMixin } from '@umbraco-cms/backoffice/element-api';
 import { UMB_AUTH_CONTEXT } from '@umbraco-cms/backoffice/auth';
-import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun, getSearch } from './api.js?v=1.2.0';
-import './seo-settings.js?v=1.2.0';
-import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.2.0';
-import { findMedia } from './api.js?v=1.2.0';
+import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun, getSearch } from './api.js?v=1.2.1';
+import './seo-settings.js?v=1.2.1';
+import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.2.1';
+import { findMedia } from './api.js?v=1.2.1';
 
 const SEVERITY_LABEL = { Critical: 'Kritisk', Warning: 'Advarsel', Info: 'Info' };
 const SEVERITY_HELP = {
@@ -955,8 +955,10 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
 
   #renderCompare(report) {
     const b = this._benchmark;
-    if (!b) return html`<div class="box bad">Kunne ikke hente sammenligningen.</div>${this.#renderChanges(report)}`;
-    if (!b.ready) return html`<div class="box info">${b.message}</div>${this.#renderChanges(report)}`;
+    const failed = (report.competitorFailures ?? []).map((f) => html`<div class="box warn"><strong>Seneste analyse af ${f.domain} fejlede</strong>
+      (${this.#fmtDate(f.atUtc)}): ${f.message} Sammenligningen bruger den seneste analyse af sitet, der lykkedes.</div>`);
+    if (!b) return html`${failed}<div class="box bad">Kunne ikke hente sammenligningen.</div>${this.#renderChanges(report)}`;
+    if (!b.ready) return html`${failed}<div class="box info">${b.message}</div>${this.#renderChanges(report)}`;
     const bm = b.benchmark;
     const num = (v, unit) => {
       if (v == null) return '–';
@@ -967,6 +969,7 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     };
     const verdict = { ahead: ['good', 'Foran'], level: ['neutral', 'På niveau'], behind: ['bad', 'Bagud'] };
     return html`
+      ${failed}
       <p class="help">Jeres site og konkurrenterne er gennemgået med de samme tjek. Her ser I, hvor I er foran, hvor I er bagud, og hvad de har, som I ikke har.</p>
 
       <div class="two">

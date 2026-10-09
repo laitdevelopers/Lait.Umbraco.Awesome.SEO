@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Lait.Umbraco.Awesome.SEO.Ai;
 using Lait.Umbraco.Awesome.SEO.Configuration;
@@ -52,6 +53,12 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
     /// <summary>The last run that failed, until the next run starts.</summary>
     public RunFailure? LastFailure { get { lock (_progressLock) return _lastFailure; } }
 
+    // ponytail: in memory, so a failure is forgotten on restart until the next scheduled run hits it again; persist it if that is too quiet
+    readonly ConcurrentDictionary<string, RunFailure> _competitorFailures = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Why the last crawl of this competitor (host as configured) failed, until a crawl of it succeeds. Nothing is stored for a failed crawl.</summary>
+    public RunFailure? CompetitorFailure(string host) => _competitorFailures.GetValueOrDefault(host);
+
     void Set(string phase, int step, string? detail = null, int done = 0, int? total = null, int? steps = null)
     {
         lock (_progressLock) { _phase = phase; _step = step; _detail = detail; _done = done; _total = total; if (steps is { } n) _steps = n; }
@@ -89,7 +96,7 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
 
             var ctx = await CrawlAsync(site.Url, site.MaxPages, ct, (done, queued) => Set("crawl-own", 1, site.Domain, done, Math.Min(site.MaxPages, done + queued)), OwnSiteHeaders());
             if (!ctx.Pages.Values.Any(p => p.Status > 0))
-                throw new InvalidOperationException($"Ingen sider på {site.Domain} kunne hentes (sitet svarer ikke, eller robots.txt svarer med en fejl). Intet er gemt; prøv igen senere.");
+                throw new InvalidOperationException($"Ingen sider på {site.Domain} kunne hentes: {WhyNothing(ctx)} Intet er gemt.");
             if (Blocked(ctx) is { } why)
                 throw new InvalidOperationException($"{site.Domain} afviser analysen: {why} Intet er gemt.");
             Set("analyze", 2);
@@ -115,10 +122,15 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
                 var host = Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : url;
                 var step = 3 + i;
                 Set("crawl-competitor", step, host);
-                try { competitors.Add(await RunCompetitorAsync(url, site.MaxPages, disabled, ct, (done, queued) => Set("crawl-competitor", step, host, done, Math.Min(site.MaxPages, done + queued)))); }
+                try
+                {
+                    competitors.Add(await RunCompetitorAsync(url, site.MaxPages, disabled, ct, (done, queued) => Set("crawl-competitor", step, host, done, Math.Min(site.MaxPages, done + queued))));
+                    _competitorFailures.TryRemove(host, out _);
+                }
                 catch (Exception e) when (!ct.IsCancellationRequested)
                 {
                     logger.LogWarning(e, "SEO crawl of competitor {Url} failed", url);
+                    _competitorFailures[host] = new RunFailure(host, e.Message.Length > 300 ? e.Message[..300] : e.Message, DateTime.UtcNow);
                 }
             }
 
@@ -152,6 +164,25 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
             403 or 429 or 503 when challenged => $"forsiden svarer med en bot-kontrol fra Cloudflare (HTTP {home.Status}). Tillad brugeragenten \"LaitSeoReport\" i Cloudflare (WAF / Bot Fight Mode) for sitet.",
             403 => "forsiden svarer HTTP 403 (adgang nægtet). Tjek IP-begrænsninger, adgangskode eller bot-beskyttelse for sitet.",
             _ => null,
+        };
+    }
+
+    /// <summary>Why a crawl got no readable page, in words an editor can act on (Danish, for the dashboard).</summary>
+    internal static string WhyNothing(SiteContext ctx)
+    {
+        var start = new Uri(ctx.StartUrl);
+        var origin = start.GetLeftPart(UriPartial.Authority);
+        var other = start.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? start.Host[4..] : "www." + start.Host;
+        if (ReferenceEquals(ctx.Robots, RobotsTxt.DisallowAll))
+            return $"robots.txt på {origin} kunne ikke hentes (serverfejl eller intet svar), og så må crawlere ikke hente nogen sider.";
+        if (ctx.BlockedByRobots.Contains(ctx.StartUrl))
+            return $"robots.txt på {origin} forbyder crawlere at hente forsiden. Ligger sitet på {other}, så ret adressen til {start.Scheme}://{other}/.";
+        var status = ctx.Pages.GetValueOrDefault(ctx.StartKey)?.Status ?? 0;
+        return status switch
+        {
+            0 => $"{start.Host} svarer ikke.",
+            401 or 403 or 429 => $"Forsiden afviser crawleren (HTTP {status}), typisk på grund af login eller bot-beskyttelse.",
+            _ => $"Forsiden svarer HTTP {status}, og ingen sider kunne læses.",
         };
     }
 
@@ -231,6 +262,8 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
     async Task<CompetitorResult> RunCompetitorAsync(string url, int maxPages, IReadOnlySet<string> disabled, CancellationToken ct, Action<int, int> onProgress)
     {
         var ctx = await CrawlAsync(url, maxPages, ct, onProgress);
+        // Without a single readable page every measurement would be 0 and compare as if it were real; keep the last good run instead.
+        if (!ctx.Pages.Values.Any(p => p.IsOk)) throw new InvalidOperationException(WhyNothing(ctx));
         var theirFindings = RuleEngine.Run(ctx, disabled);   // not stored: only used for their score and metrics in the comparison
         var domain = new Uri(ctx.StartUrl).Host;
         var fingerprints = ctx.Pages.Values.Select(PageFingerprint.From).ToDictionary(p => p.Url);

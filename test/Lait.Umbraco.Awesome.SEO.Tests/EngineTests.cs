@@ -197,6 +197,26 @@ public class EngineTests
     }
 
     [Fact]
+    public async Task A_site_whose_robots_forbid_everything_gets_no_pages_and_a_reason_that_suggests_the_www_address()
+    {
+        // ecreo.dk, October 2026: the bare domain's robots.txt says "Disallow: /" (the real site is on www).
+        var routes = new Dictionary<string, (HttpStatusCode, string, string?)>
+        {
+            ["/robots.txt"] = (HttpStatusCode.OK, "User-agent: *\nDisallow: /\n# the hostname is not configured", "text/plain"),
+            ["/"] = (HttpStatusCode.OK, Good().Replace("SELF", Site + "/"), "text/html"),
+        };
+        var ctx = await new SiteCrawler(new HttpClient(new FakeHandler(routes)), new CrawlOptions { DelayMs = 0 }).CrawlAsync(Site + "/");
+
+        Assert.Empty(ctx.Pages);
+        var why = Lait.Umbraco.Awesome.SEO.Services.SeoRunner.WhyNothing(ctx);
+        Assert.Contains("robots.txt på https://example.dk forbyder", why);
+        Assert.Contains("https://www.example.dk/", why);
+
+        var forbidden = new SiteContext { StartUrl = Site + "/", Pages = new Dictionary<string, PageSnapshot> { [Site + "/"] = Page("/", "", status: 403) } };
+        Assert.Contains("HTTP 403", Lait.Umbraco.Awesome.SEO.Services.SeoRunner.WhyNothing(forbidden));
+    }
+
+    [Fact]
     public async Task Crawler_survives_a_failing_page_never_follows_redirects_off_the_site_and_ignores_foreign_sitemaps()
     {
         var routes = new Dictionary<string, (HttpStatusCode, string, string?)>

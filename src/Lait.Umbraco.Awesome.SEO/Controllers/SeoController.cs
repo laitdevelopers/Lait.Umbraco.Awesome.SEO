@@ -75,6 +75,9 @@ public class SeoController(SeoStore store, SeoRunner runner, SiteSettings sites,
             findings, competitors, run is null ? null : Ai(run.Id))
         {
             Score = score,
+            CompetitorFailures = site.Competitors.Take(SeoRunner.MaxCompetitors)
+                .Where(u => Uri.TryCreate(u, UriKind.Absolute, out _))
+                .Select(u => runner.CompetitorFailure(new Uri(u).Host)).OfType<RunFailure>().ToList(),
             Passed = run is null ? [] : RuleCatalog.All
                 .Where(r => !site.DisabledRules.Contains(r.Id) && !open.Any(f => f.RuleId == r.Id))
                 .Select(r => new PassedCheck(r.Id, r.Title, r.Category.ToString())).ToList(),
