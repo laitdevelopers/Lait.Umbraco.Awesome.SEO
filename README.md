@@ -95,6 +95,23 @@ Everything can be set in the dashboard. `appsettings.json` can seed the sites on
 The scheduler runs on the server with the scheduling role only, starts after the first request and checks every
 five minutes which sites are due.
 
+## Umbraco Cloud
+
+The package runs on Umbraco Cloud like any NuGet package (no file system writes, tables are created by a package
+migration on each environment's database at startup). Things to know:
+
+- **Protected environments** (development/staging use basic auth): the crawler sends Umbraco's basic-auth shared
+  secret header (`Umbraco:CMS:BasicAuth:SharedSecret`) when it crawls *your own* site, so the analysis works there too.
+  It is never sent to competitors. If no shared secret is configured, the run stops with a clear message instead of
+  saving an empty report.
+- **Web Application Firewall / bot protection** (Cloudflare on custom hostnames): if the start page answers with a bot
+  challenge, the run stops and says so. Allow the user agent `LaitSeoReport` in the WAF or Bot Fight Mode settings.
+- **AI keys**: keys saved in the dashboard are encrypted with ASP.NET Data Protection. If the key ring does not survive a
+  redeploy, the dashboard asks you to enter them again. On Cloud you can instead use Secrets management
+  (environment variables such as `LaitSeo__Ai__Claude__ApiKey` and `LaitSeo__Ai__Jev__ApiKey`).
+- **Per environment**: sites, competitors, AI settings and reports live in each environment's database and are not
+  moved by Umbraco Deploy. Set the site up on the environment you want to analyse (usually Live).
+
 ## How the crawler behaves
 
 It identifies itself as `LaitSeoReport/1.0`, respects robots.txt (RFC 9309), waits 250 ms between requests, reads

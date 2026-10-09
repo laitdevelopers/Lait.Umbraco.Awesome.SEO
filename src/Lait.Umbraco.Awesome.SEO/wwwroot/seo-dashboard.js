@@ -4,10 +4,10 @@
 import { LitElement, html, css, nothing } from '@umbraco-cms/backoffice/external/lit';
 import { UmbElementMixin } from '@umbraco-cms/backoffice/element-api';
 import { UMB_AUTH_CONTEXT } from '@umbraco-cms/backoffice/auth';
-import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.1.0.2';
-import './seo-settings.js?v=1.1.0.2';
-import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.1.0.2';
-import { findMedia } from './api.js?v=1.1.0.2';
+import { getDomains, getReport, getBenchmark, getEstimate, getPlan, getPlanEstimate, writePlan, getSettings, startRun } from './api.js?v=1.1.1.1';
+import './seo-settings.js?v=1.1.1.1';
+import { getCopilot, sendToCopilot } from './seo-copilot.js?v=1.1.1.1';
+import { findMedia } from './api.js?v=1.1.1.1';
 
 const SEVERITY_LABEL = { Critical: 'Kritisk', Warning: 'Advarsel', Info: 'Info' };
 const SEVERITY_HELP = {
@@ -188,13 +188,17 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
       this._aiPick = null;
       sendToCopilot({ ...task, agentId });
     };
-    return html`<div class="box info">
+    // A dialog in the middle of the screen: the button that opened it may be far down the page.
+    return html`<div class="overlay" @click=${(e) => e.target === e.currentTarget && (this._aiPick = null)}
+        @keydown=${(e) => e.key === 'Escape' && (this._aiPick = null)}>
+      <div class="dialog box info" role="dialog" aria-modal="true" aria-label="Vælg AI-agent">
       <strong>Hvilken AI-agent skal tage opgaven?</strong>
       <p class="muted">${task.entity === 'media' ? 'Mediet' : 'Siden'} åbnes med Umbraco AI Copilot, og agenten foreslår rettelsen. Du godkender den selv.</p>
       <div class="actions">
         ${this._agents.map((a) => html`<uui-button look="primary" label=${a.name} @click=${() => go(a.id)}>${a.name}</uui-button>`)}
         <uui-button look="secondary" label="Lad Umbraco vælge" @click=${() => go('auto')}>Lad Umbraco vælge</uui-button>
         <uui-button look="secondary" label="Annuller" @click=${() => (this._aiPick = null)}>Annuller</uui-button>
+      </div>
       </div>
     </div>`;
   }
@@ -969,6 +973,8 @@ class LaitSeoDashboard extends UmbElementMixin(LitElement) {
     td.url { word-break: break-all; }
     .evidence { white-space: pre-line; word-break: break-word; }
     h4 { margin: 12px 0 6px; }
+    .overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .overlay .dialog { max-width: 520px; width: 100%; margin: 0; background: var(--uui-color-surface, #fff); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); }
     pre { background: var(--uui-color-surface-alt); padding: 8px 10px; border-radius: 4px; overflow-x: auto; margin: 4px 0; }
     td.own { font-weight: 700; }
     td.own.good { color: var(--good); background: var(--good-bg); }

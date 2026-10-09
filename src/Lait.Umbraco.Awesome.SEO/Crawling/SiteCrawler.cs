@@ -16,6 +16,8 @@ public sealed class CrawlOptions
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(30);
     /// <summary>Bodies are cut here: enough for any real page, protects memory against huge or endless responses.</summary>
     public int MaxBodyBytes { get; init; } = 5 * 1024 * 1024;
+    /// <summary>Sent with every request (the crawler never leaves the site). Only for the own site: e.g. Umbraco's basic-auth shared secret.</summary>
+    public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
 }
 
 /// <summary>
@@ -137,6 +139,7 @@ public sealed class SiteCrawler(HttpClient http, CrawlOptions? options = null)
         if (!_first) await Task.Delay(_o.DelayMs, ct);
         _first = false;
         req.Headers.UserAgent.ParseAdd(_o.UserAgent);
+        foreach (var (name, value) in _o.Headers) req.Headers.TryAddWithoutValidation(name, value);
         return await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 

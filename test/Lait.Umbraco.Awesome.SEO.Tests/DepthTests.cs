@@ -157,4 +157,32 @@ public class DepthTests
         Assert.Empty(p.Links);
         Assert.Equal("head", Assert.Single(p.ImagesWithoutAlt).Region);
     }
+
+    [Fact]
+    public void A_password_protected_or_bot_challenged_start_page_is_reported_as_blocked_not_analysed()
+    {
+        PageSnapshot Home(int status, bool cloudflare = false) => new()
+        {
+            Url = Site + "/", FinalUrl = Site + "/", Status = status, IsHtml = true,
+            Headers = cloudflare ? new Dictionary<string, string> { ["cf-mitigated"] = "challenge" } : new Dictionary<string, string>(),
+        };
+        SiteContext C(PageSnapshot home) => new() { StartUrl = Site + "/", Pages = new Dictionary<string, PageSnapshot> { [home.Url] = home } };
+
+        Assert.Contains("kræver login", Services.SeoRunner.Blocked(C(Home(401))));
+        Assert.Contains("Cloudflare", Services.SeoRunner.Blocked(C(Home(403, cloudflare: true))));
+        Assert.Contains("403", Services.SeoRunner.Blocked(C(Home(403))));
+        Assert.Null(Services.SeoRunner.Blocked(C(Home(200))));
+        Assert.Null(Services.SeoRunner.Blocked(C(Home(503))));   // a plain 503 is a broken site: the rules report it
+    }
+
+    [Fact]
+    public void Umbraco_basic_auth_shared_secret_is_used_for_the_own_site_crawl()
+    {
+        Microsoft.Extensions.Configuration.IConfiguration Cfg(params (string, string)[] kv) =>
+            Microsoft.Extensions.Configuration.MemoryConfigurationBuilderExtensions.AddInMemoryCollection(new Microsoft.Extensions.Configuration.ConfigurationBuilder(), kv.Select(x => new KeyValuePair<string, string?>(x.Item1, x.Item2))).Build();
+
+        Assert.Empty(Services.SeoRunner.SharedSecretHeader(Cfg()));
+        Assert.Equal("s3cret", Services.SeoRunner.SharedSecretHeader(Cfg(("Umbraco:CMS:BasicAuth:SharedSecret:Value", "s3cret")))["X-Authentication-Shared-Secret"]);
+        Assert.Equal("s3cret", Services.SeoRunner.SharedSecretHeader(Cfg(("Umbraco:CMS:BasicAuth:SharedSecret:Value", "s3cret"), ("Umbraco:CMS:BasicAuth:SharedSecret:HeaderName", "X-Mine")))["X-Mine"]);
+    }
 }

@@ -19,7 +19,7 @@ public sealed record RunFailure(string Domain, string Message, DateTime AtUtc);
 public sealed record SeoRunResult(int RunId, double Score, bool IsBaseline, DiffResult Diff, IReadOnlyList<CompetitorResult> Competitors);
 
 /// <summary>One full run for a site: crawl, rules, diff, store; then the competitors; then (unless baseline/dry run) the AI report.</summary>
-public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, ContentLookup contentLookup, AiPipeline aiPipeline, IOptionsMonitor<AiOptions> aiOptions, ILogger<SeoRunner> logger)
+public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, ContentLookup contentLookup, AiPipeline aiPipeline, IOptionsMonitor<AiOptions> aiOptions, Microsoft.Extensions.Configuration.IConfiguration config, ILogger<SeoRunner> logger)
 {
     public const string HttpClientName = "LaitSeo";
     public const int MaxCompetitors = 5;
@@ -87,9 +87,11 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
             lock (_progressLock) { _domain = site.Domain; _started = DateTime.UtcNow; _lastFailure = null; }
             Set("crawl-own", 1, site.Domain, steps: 2 + competitorUrls.Count + (aiPossible ? 2 : 0));
 
-            var ctx = await CrawlAsync(site.Url, site.MaxPages, ct, (done, queued) => Set("crawl-own", 1, site.Domain, done, Math.Min(site.MaxPages, done + queued)));
+            var ctx = await CrawlAsync(site.Url, site.MaxPages, ct, (done, queued) => Set("crawl-own", 1, site.Domain, done, Math.Min(site.MaxPages, done + queued)), OwnSiteHeaders());
             if (!ctx.Pages.Values.Any(p => p.Status > 0))
                 throw new InvalidOperationException($"Ingen sider på {site.Domain} kunne hentes (sitet svarer ikke, eller robots.txt svarer med en fejl). Intet er gemt; prøv igen senere.");
+            if (Blocked(ctx) is { } why)
+                throw new InvalidOperationException($"{site.Domain} afviser analysen: {why} Intet er gemt.");
             Set("analyze", 2);
             var disabled = site.DisabledRules.ToHashSet();
             var findings = await WithNodesAsync(RuleEngine.Run(ctx, disabled), site.Url);
@@ -134,6 +136,23 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
             lock (_progressLock) _lastFailure = new RunFailure(_domain, e.Message.Length > 300 ? e.Message[..300] : e.Message, DateTime.UtcNow);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Why the start page could not be read, when it is a block rather than a broken site: password protection (typical on
+    /// Umbraco Cloud development/staging environments) or a bot challenge (Cloudflare). Saving such a run would wipe the report.
+    /// </summary>
+    internal static string? Blocked(SiteContext ctx)
+    {
+        if (ctx.Pages.GetValueOrDefault(ctx.StartKey) is not { } home) return null;
+        var challenged = home.Headers.ContainsKey("cf-mitigated");
+        return home.Status switch
+        {
+            401 => "forsiden kræver login (HTTP 401). Er miljøet beskyttet med adgangskode, fx et Umbraco Cloud dev- eller staging-miljø, så analysér det offentlige live-site i stedet.",
+            403 or 429 or 503 when challenged => $"forsiden svarer med en bot-kontrol fra Cloudflare (HTTP {home.Status}). Tillad brugeragenten \"LaitSeoReport\" i Cloudflare (WAF / Bot Fight Mode) for sitet.",
+            403 => "forsiden svarer HTTP 403 (adgang nægtet). Tjek IP-begrænsninger, adgangskode eller bot-beskyttelse for sitet.",
+            _ => null,
+        };
     }
 
     /// <summary>Own site only: attach node id/key/document type to findings whose URL is a published node. Never fails the run.</summary>
@@ -236,8 +255,22 @@ public sealed class SeoRunner(IHttpClientFactory httpFactory, SeoStore store, Co
         return new CompetitorResult(domain, runId, previous is null, changes);
     }
 
-    Task<SiteContext> CrawlAsync(string url, int maxPages, CancellationToken ct, Action<int, int>? onProgress = null) =>
-        new SiteCrawler(httpFactory.CreateClient(HttpClientName), new CrawlOptions { MaxPages = maxPages }).CrawlAsync(url, ct, onProgress);
+    Task<SiteContext> CrawlAsync(string url, int maxPages, CancellationToken ct, Action<int, int>? onProgress = null, IReadOnlyDictionary<string, string>? headers = null) =>
+        new SiteCrawler(httpFactory.CreateClient(HttpClientName), new CrawlOptions { MaxPages = maxPages, Headers = headers ?? new Dictionary<string, string>() }).CrawlAsync(url, ct, onProgress);
+
+    /// <summary>
+    /// Umbraco basic auth (Umbraco Cloud protects development/staging this way) lets the site call itself with a shared secret header.
+    /// Sent only when crawling the own site, never to competitors.
+    /// </summary>
+    internal IReadOnlyDictionary<string, string> OwnSiteHeaders() => SharedSecretHeader(config);
+
+    internal static IReadOnlyDictionary<string, string> SharedSecretHeader(Microsoft.Extensions.Configuration.IConfiguration config)
+    {
+        var secret = config["Umbraco:CMS:BasicAuth:SharedSecret:Value"];
+        if (string.IsNullOrWhiteSpace(secret)) return new Dictionary<string, string>();
+        var name = config["Umbraco:CMS:BasicAuth:SharedSecret:HeaderName"];
+        return new Dictionary<string, string> { [string.IsNullOrWhiteSpace(name) ? "X-Authentication-Shared-Secret" : name] = secret };
+    }
 
     static FindingRow Row(Finding f, bool isNew) =>
         new()

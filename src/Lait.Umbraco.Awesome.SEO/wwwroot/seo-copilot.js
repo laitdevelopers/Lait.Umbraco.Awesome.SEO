@@ -59,21 +59,29 @@ function pending() {
 }
 
 let onPathSince = 0;
+let opened = false;
 async function tick() {
   const task = pending();
   if (!task || !copilot) return;
-  if (location.pathname !== task.path) {
+  // Umbraco extends the URL after opening the item (…/edit/{key}/invariant, …/da-DK/view/content), so match the start.
+  if (!location.pathname.startsWith(task.path)) {
     onPathSince = 0;
     return;
+  }
+  // Open the sidebar right away, so the editor sees something happen while the workspace loads.
+  if (!opened) {
+    opened = true;
+    try { copilot.open(); } catch (e) { console.warn('[Lait SEO] Could not open Copilot', e); }
   }
   onPathSince ||= Date.now();
   if (Date.now() - onPathSince < SETTLE_MS) return;
 
   sessionStorage.removeItem(KEY);
   onPathSince = 0;
+  opened = false;
   try {
     if (task.agentId) {
-      await copilot.loadAgents?.();
+      try { await copilot.loadAgents?.(); } catch { /* the list may already be loaded */ }
       copilot.selectAgent(task.agentId);
     }
     copilot.open();
